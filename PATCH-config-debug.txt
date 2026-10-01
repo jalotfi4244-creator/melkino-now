@@ -1,0 +1,22 @@
+فقط این تابع را در config.php هاست عوض کنید. بقیهٔ فایل را دست نزنید.
+
+قبل:
+function melkinoShouldShowErrorDetails(): bool
+{
+    if (!empty($_SESSION['is_admin'])) {
+        return true;
+    }
+    return isset($_GET['melkino_debug']) && $_GET['melkino_debug'] === '1';
+}
+
+بعد:
+function melkinoShouldShowErrorDetails(): bool
+{
+    if (session_status() === PHP_SESSION_NONE && !headers_sent() && PHP_SAPI !== 'cli') {
+        @session_start();
+    }
+    return !empty($_SESSION['is_admin']);
+}
+
+اثر: ?melkino_debug=1 دیگر برای مهمان SQL/مسیر فایل نشان نمی‌دهد.
+ادمین واردشده همچنان جزئیات خطا را می‌بیند.
