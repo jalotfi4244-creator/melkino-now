@@ -1,0 +1,596 @@
+<?php
+if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
+    @session_start();
+}
+$_mkPage = strtolower(basename((string) ($_SERVER['SCRIPT_NAME'] ?? $_SERVER['PHP_SELF'] ?? '')));
+$_mkAllow = ['login.php','logout.php','auth.php','auth-telegram.php','auth-bale.php','auth-eitaa.php','request-otp.php','verify-otp.php','admin-login.php','admin-logout.php','telegram.php','bale.php','eitaa.php','telegram-relay.php','identity-sync.php','bale-ok.php','r.php'];
+if (
+    $_mkPage !== ''
+    && !in_array($_mkPage, $_mkAllow, true)
+    && strncmp($_mkPage, 'admin-', 6) !== 0
+    && empty($_SESSION['user_id'])
+    && empty($_SESSION['reg_telegram_id'])
+    && empty($_SESSION['reg_bale_id'])
+    && empty($_SESSION['reg_eitaa_id'])
+    && empty($_SESSION['user_phone'])
+    && empty($_SESSION['is_admin'])
+) {
+    $here = (string) ($_SERVER['REQUEST_URI'] ?? $_mkPage);
+    $here = preg_replace('#^/+#', '', $here) ?? $_mkPage;
+    if ($here === '' || strpos($here, 'login.php') === 0) {
+        $here = 'home.php';
+    }
+    if (!headers_sent()) {
+        header('Location: login.php?redirect=' . rawurlencode($here), true, 302);
+    }
+    exit;
+}
+unset($_mkPage, $_mkAllow);
+/*
+|--------------------------------------------------------------------------
+| صفحهٔ مستقل «مقایسهٔ ملک‌ها»
+|--------------------------------------------------------------------------
+| این صفحه جایگزین/تکمیل‌کنندهٔ بخش مقایسه در پروفایل است:
+|   - ۳ دستهٔ قابل تغییرنام، هرکدام تا ۵ ملک
+|   - حذف، جابه‌جایی بین دسته‌ها، خالی‌کردن دسته
+|   - جدول امتیازدهی از ۱۰۰ (قیمت، متراژ، خواب، سال ساخت، امتیازات، کیفیت)
+|
+| همه‌چیز سمت سرور رندر می‌شود؛ بنابراین حتی اگر مرورگر/جاوااسکریپت
+| درست کار نکند، کاربر همچنان می‌تواند مقایسه کند.
+|
+| نکته: مقایسه برای مهمان‌ها هم کار می‌کند (شناسهٔ مهمان در کوکی) و
+| به‌محض ورود کاربر، به حساب او منتقل می‌شود.
+|--------------------------------------------------------------------------
+*/
+
+session_start();
+
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/db_helpers.php';
+require_once __DIR__ . '/compare-lib.php';
+
+global $pdo;
+
+$dbReady = $pdo instanceof PDO;
+$tableError = '';
+if ($dbReady) {
+    try {
+        melkinoEnsureCompareTables($pdo);
+    } catch (Throwable $e) {
+        $tableError = 'آماده‌سازی جدول‌های مقایسه ناموفق بود.';
+    }
+}
+
+$identity = $dbReady ? melkinoCurrentIdentity() : ['user_id' => null, 'telegram_id' => ''];
+// راند ۲۴: مقایسه فقط برای کاربر وارد‌شده است
+$loggedIn = !empty($identity['user_id']);
+if ($dbReady && $loggedIn) {
+    melkinoCompareMergeGuest($pdo, $identity);
+}
+
+[$ownerWhere, $ownerParams, $ownerUserId, $ownerTelegramId, $guestToken] = $dbReady
+    ? melkinoCompareOwner($identity, 'ci')
+    : ['', [], null, '', ''];
+[$ownerWherePlain, $ownerParamsPlain] = $dbReady
+    ? melkinoCompareOwner($identity)
+    : ['', []];
+
+$flash = trim((string)($_GET['msg'] ?? ''));
+$flashType = trim((string)($_GET['mt'] ?? 'ok'));
+$maxPerGroup = melkinoCompareMaxPerGroup();
+
+/* =========================================================
+   پردازش عملیات (POST + ریدایرکت تا ارسال دوباره رخ ندهد)
+   ========================================================= */
+if ($dbReady && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $action = trim((string)($_POST['action'] ?? ''));
+    $redirectGroup = max(1, min(3, (int)($_POST['group'] ?? 1)));
+    $message = '';
+    $messageType = 'ok';
+
+    try {
+        if ($action === 'remove') {
+            $adId = trim((string)($_POST['ad_id'] ?? ''));
+            if ($adId !== '') {
+                $stmt = $pdo->prepare("DELETE FROM compare_items WHERE $ownerWherePlain AND ad_id = ?");
+                $p = $ownerParamsPlain;
+                $p[] = $adId;
+                $stmt->execute($p);
+                $message = $stmt->rowCount() > 0 ? 'ملک از مقایسه حذف شد.' : 'این ملک در مقایسه نبود.';
+            }
+        } elseif ($action === 'move') {
+            $adId = trim((string)($_POST['ad_id'] ?? ''));
+            $target = (int)($_POST['target_group'] ?? 0);
+            if ($adId !== '' && $target >= 1 && $target <= 3) {
+                $stmt = $pdo->prepare("SELECT id, group_no FROM compare_items WHERE $ownerWherePlain AND ad_id = ? LIMIT 1");
+                $p = $ownerParamsPlain;
+                $p[] = $adId;
+                $stmt->execute($p);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($row && (int)$row['group_no'] !== $target) {
+                    if (melkinoCompareCountInGroup($pdo, $ownerWhere, $ownerParams, $target) >= $maxPerGroup) {
+                        $message = 'دستهٔ مقصد پر است (حداکثر ' . $maxPerGroup . ' ملک).';
+                        $messageType = 'warn';
+                    } else {
+                        $pdo->prepare('UPDATE compare_items SET group_no = ? WHERE id = ?')->execute([$target, (int)$row['id']]);
+                        $message = 'ملک به «' . melkinoCompareGroupName($pdo, $ownerWherePlain, $ownerParamsPlain, $target) . '» منتقل شد.';
+                        $redirectGroup = $target;
+                    }
+                }
+            }
+        } elseif ($action === 'rename') {
+            $target = (int)($_POST['group'] ?? 0);
+            $name = trim((string)($_POST['name'] ?? ''));
+            if ($target >= 1 && $target <= 3) {
+                $name = function_exists('mb_substr') ? mb_substr($name, 0, 40, 'UTF-8') : substr($name, 0, 40);
+                $stmt = $pdo->prepare("SELECT id FROM compare_groups WHERE $ownerWherePlain AND group_no = ? LIMIT 1");
+                $p = $ownerParamsPlain;
+                $p[] = $target;
+                $stmt->execute($p);
+                $existing = $stmt->fetchColumn();
+                if ($existing) {
+                    $pdo->prepare('UPDATE compare_groups SET name = ? WHERE id = ?')->execute([$name, (int)$existing]);
+                } else {
+                    $pdo->prepare('INSERT INTO compare_groups (user_id, telegram_id, guest_token, group_no, name) VALUES (?, ?, ?, ?, ?)')
+                        ->execute([
+                            $ownerUserId,
+                            $ownerTelegramId !== '' ? $ownerTelegramId : null,
+                            $guestToken !== '' ? $guestToken : null,
+                            $target,
+                            $name,
+                        ]);
+                }
+                $message = 'نام دسته ذخیره شد.';
+                $redirectGroup = $target;
+            }
+        } elseif ($action === 'clear') {
+            $target = (int)($_POST['group'] ?? 0);
+            if ($target >= 1 && $target <= 3) {
+                $stmt = $pdo->prepare("DELETE FROM compare_items WHERE $ownerWherePlain AND group_no = ?");
+                $p = $ownerParamsPlain;
+                $p[] = $target;
+                $stmt->execute($p);
+                $message = $stmt->rowCount() . ' ملک از این دسته حذف شد.';
+                $redirectGroup = $target;
+            }
+        }
+    } catch (Throwable $e) {
+        $message = 'خطا در انجام عملیات: ' . $e->getMessage();
+        $messageType = 'err';
+    }
+
+    $qs = 'group=' . $redirectGroup;
+    if ($message !== '') {
+        $qs .= '&msg=' . rawurlencode($message) . '&mt=' . rawurlencode($messageType);
+    }
+    if (!headers_sent()) {
+        header('Location: compare-page.php?' . $qs);
+        exit;
+    }
+}
+
+/* =========================================================
+   دادهٔ نمایش
+   ========================================================= */
+$groups = [];
+$total = 0;
+if ($dbReady && $ownerWhere !== '') {
+    try {
+        $groups = melkinoCompareGroups($pdo, $ownerWhere, $ownerParams, $ownerWherePlain, $ownerParamsPlain);
+        foreach ($groups as $g) {
+            $total += (int)$g['count'];
+        }
+    } catch (Throwable $e) {
+        $tableError = 'خواندن دادهٔ مقایسه ناموفق بود.';
+    }
+}
+
+$activeGroupNo = max(1, min(3, (int)($_GET['group'] ?? 1)));
+$activeGroup = null;
+foreach ($groups as $g) {
+    if ((int)$g['no'] === $activeGroupNo) {
+        $activeGroup = $g;
+        break;
+    }
+}
+if ($activeGroup === null) {
+    $activeGroup = ['no' => $activeGroupNo, 'name' => 'گروه ' . $activeGroupNo, 'count' => 0, 'items' => []];
+}
+
+$scoreData = null;
+$scoreError = '';
+if ($dbReady && $ownerWhere !== '' && (int)$activeGroup['count'] >= 2) {
+    try {
+        $scoreData = melkinoCompareScoreData($pdo, $ownerWhere, $ownerParams, $activeGroupNo);
+        if (count($scoreData['ads']) < 2) {
+            $scoreData = null;
+            $scoreError = 'برای امتیازدهی حداقل ۲ ملک منتشرشده در این دسته لازم است.';
+        }
+    } catch (Throwable $e) {
+        $scoreError = 'امتیازدهی ممکن نشد.';
+    }
+} elseif ((int)$activeGroup['count'] === 1) {
+    $scoreError = 'برای مقایسه و امتیازدهی، حداقل یک ملک دیگر هم به این دسته اضافه کن.';
+}
+
+/** قیمت هر ملک، به‌صورت خوانا */
+$priceText = function (array $ad): string {
+    $num = function ($v): string {
+        $raw = str_replace(',', '', trim((string)$v));
+        if ($raw === '' || !is_numeric($raw) || (float)$raw == 0.0) {
+            return '';
+        }
+        return number_format((float)$raw);
+    };
+    $tx = trim((string)($ad['transaction_type'] ?? ''));
+    $isRent = mb_strpos($tx, 'اجاره') !== false || mb_strpos($tx, 'رهن') !== false;
+    if ($isRent) {
+        $dep = $num($ad['deposit'] ?? '');
+        $rent = $num($ad['rent_monthly'] ?? '');
+        if ($dep === '' && $rent === '') {
+            return 'تماس بگیرید';
+        }
+        $parts = [];
+        if ($dep !== '') {
+            $parts[] = 'ودیعه ' . $dep;
+        }
+        if ($rent !== '') {
+            $parts[] = 'اجاره ' . $rent;
+        }
+        return implode(' + ', $parts) . ' تومان';
+    }
+    // راند ۷۳: همهٔ ستون‌های قیمتی — شامل display_price و ستون مستقل price (اسکیمای لگاسی)
+    $sell = $num($ad['display_price'] ?? '') ?: $num($ad['price_sell'] ?? '') ?: $num($ad['total_price'] ?? '') ?: $num($ad['price'] ?? '') ?: $num($ad['deposit'] ?? '');
+    return $sell !== '' ? $sell . ' تومان' : 'تماس بگیرید';
+};
+
+/** آدرس تصویر ملک */
+$imageUrl = function (array $ad): string {
+    $name = trim((string)($ad['image'] ?? ''));
+    if ($name !== '') {
+        if (preg_match('#^https?://#i', $name)) {
+            return $name;
+        }
+        return ltrim($name, '/');
+    }
+    // راند ۷۰: آگهی بدون عکس → عکس تزیینی نوع ملک (مثل بقیهٔ صفحه‌ها)
+    if (function_exists('melkinoDefaultImageForAd')) {
+        return melkinoDefaultImageForAd($ad);
+    }
+    return '';
+};
+
+/** آیا تصویر فعلی، تزیینی است (نه آپلودی)؟ */
+$melkinoIsDecor = function (array $ad) use ($imageUrl): bool {
+    return trim((string)($ad['image'] ?? '')) === '' && $imageUrl($ad) !== '';
+};
+
+/** برش امن متن (بدون وابستگی قطعی به mbstring) */
+$cut = function ($text, int $len): string {
+    $text = (string)$text;
+    return function_exists('mb_substr') ? mb_substr($text, 0, $len, 'UTF-8') : substr($text, 0, $len);
+};
+
+$numFa = function ($v): string {
+    $raw = str_replace(',', '', trim((string)$v));
+    if ($raw === '' || !is_numeric($raw) || (float)$raw == 0.0) {
+        return '—';
+    }
+    return number_format((float)$raw);
+};
+
+$criteria = [
+    'price'     => '' . melkinoSvgIcon('coins') . ' قیمت (۳۵)',
+    'area'      => '' . melkinoSvgIcon('ruler') . ' متراژ (۱۵)',
+    'rooms'     => '' . melkinoSvgIcon('bed') . ' خواب (۱۰)',
+    'year'      => '' . melkinoSvgIcon('calendar') . ' سال ساخت (۱۰)',
+    'amenities' => '' . melkinoSvgIcon('sparkles') . ' امکانات (۱۵)',
+    'quality'   => '' . melkinoSvgIcon('image') . ' کیفیت آگهی (۱۵)',
+];
+
+require_once __DIR__ . '/header.php';
+?>
+<style>
+.compare-page { max-width: 1100px; margin: 0 auto; padding: 14px 14px 110px; }
+.cmp-hero { padding: 20px; border-radius: 22px; margin-bottom: 14px; background: radial-gradient(circle at 85% 15%, rgba(212,175,55,.15), transparent 30%), linear-gradient(135deg,#073737,#052727 70%,#031c1c); border: 1px solid rgba(212,175,55,.12); box-shadow: var(--shadow-card); }
+.cmp-hero h1 { margin: 0; color: #fff; font-size: clamp(21px, 5.4vw, 30px); font-weight: 900; }
+.cmp-hero h1 span { color: #f0d36a; }
+.cmp-hero p { margin: 8px 0 0; color: rgba(255,255,255,.6); font-size: 11px; line-height: 1.9; }
+.cmp-flash { margin: 0 0 12px; padding: 11px 14px; border-radius: 12px; font-size: 12px; font-weight: 700; line-height: 1.8; }
+.cmp-flash.ok { background: rgba(16,185,129,.12); color: #0f9d76; border: 1px solid rgba(16,185,129,.25); }
+.cmp-flash.warn { background: rgba(245,158,11,.12); color: #b45309; border: 1px solid rgba(245,158,11,.25); }
+.cmp-flash.err { background: rgba(220,38,38,.10); color: #dc2626; border: 1px solid rgba(220,38,38,.22); }
+.cmp-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; }
+.cmp-tab { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); color: var(--text-secondary); font-family: inherit; font-size: 12px; font-weight: 800; text-decoration: none; white-space: nowrap; }
+.cmp-tab.active { background: linear-gradient(135deg, var(--primary), #0b5d5b); color: #fff; border-color: transparent; }
+.cmp-tab .badge { padding: 2px 7px; border-radius: 999px; background: rgba(0,0,0,.12); font-size: 10px; }
+.cmp-tab.active .badge { background: rgba(255,255,255,.22); }
+.cmp-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.cmp-toolbar form { display: flex; gap: 6px; align-items: center; margin: 0; flex-wrap: wrap; }
+.cmp-input { flex: 1 1 150px; min-width: 0; height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text-primary); font-family: inherit; font-size: 12px; }
+.cmp-btn { height: 42px; padding: 0 15px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-family: inherit; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.cmp-btn.primary { background: var(--primary); color: #fff; border-color: transparent; }
+.cmp-btn.danger { background: rgba(220,38,38,.08); color: #dc2626; border-color: rgba(220,38,38,.2); }
+.cmp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.cmp-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); display: flex; flex-direction: column; }
+.cmp-card-img { position: relative; height: 150px; background: linear-gradient(145deg, rgba(212,175,55,.12), rgba(255,255,255,.02)); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 30px; overflow: hidden; }
+.mk-decor-badge{position:absolute;bottom:8px;inset-inline-start:8px;background:rgba(15,23,42,.62);color:#fff;font-size:10px;line-height:1.2;padding:4px 9px;border-radius:999px;z-index:3;backdrop-filter:blur(4px);}
+.cmp-card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cmp-card-body { padding: 12px; display: flex; flex-direction: column; gap: 7px; flex: 1; }
+.cmp-card-title { font-size: 13px; font-weight: 800; color: var(--text-primary); line-height: 1.7; }
+.cmp-card-title a { color: inherit; text-decoration: none; }
+.cmp-card-sub { font-size: 10px; color: var(--text-secondary); }
+.cmp-card-price { font-size: 13px; font-weight: 900; color: var(--gold,#d4af37); }
+.cmp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.cmp-chip { padding: 3px 7px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--text-secondary); font-size: 9px; }
+.cmp-card-actions { display: flex; gap: 6px; margin-top: auto; flex-wrap: wrap; }
+.cmp-card-actions select { flex: 1 1 96px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text-secondary); font-family: inherit; font-size: 10px; padding: 0 6px; }
+.cmp-card-actions button { height: 38px; padding: 0 12px; border-radius: 10px; border: none; background: rgba(220,38,38,.09); color: #dc2626; font-family: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.cmp-empty { text-align: center; padding: 48px 18px; background: var(--surface); border: 1px dashed var(--border); border-radius: 20px; color: var(--text-secondary); font-size: 12px; line-height: 2; }
+.cmp-empty .big { font-size: 34px; margin-bottom: 8px; }
+.cmp-section-title { margin: 18px 2px 10px; font-size: 14px; font-weight: 900; color: var(--text-primary); }
+.cmp-score-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); }
+.cmp-table { width: 100%; border-collapse: collapse; min-width: 560px; }
+.cmp-table th, .cmp-table td { padding: 10px 9px; border-bottom: 1px solid var(--border); font-size: 11px; text-align: center; white-space: nowrap; }
+.cmp-table thead th { background: var(--bg); color: var(--text-secondary); font-weight: 800; }
+.cmp-table tbody th { text-align: right; color: var(--text-secondary); font-weight: 700; background: var(--bg); }
+.cmp-table tbody tr:last-child th, .cmp-table tbody tr:last-child td { border-bottom: none; }
+.cmp-table tr.winner td, .cmp-table tr.winner th { background: rgba(212,175,55,.10); }
+.cmp-table td.total { font-weight: 900; color: var(--gold,#d4af37); font-size: 13px; }
+.cmp-highlights { margin-top: 12px; padding: 13px 15px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); font-size: 11px; line-height: 2.1; color: var(--text-secondary); }
+.cmp-highlights b { color: var(--text-primary); }
+.cmp-warn { margin-top: 10px; padding: 11px 14px; border-radius: 14px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.25); color: #b45309; font-size: 11px; line-height: 1.9; }
+.cmp-note { margin-top: 10px; font-size: 10px; color: var(--text-secondary); line-height: 1.9; }
+@media (max-width: 520px) {
+  .cmp-grid { grid-template-columns: 1fr; }
+  .cmp-hero { padding: 16px; }
+}
+
+    /* راند ۴۳: تاریک‌سازی هشدارها + حرکت ظریف */
+    [data-theme="dark"] .cmp-flash.warn, [data-theme="dark"] .cmp-warn { color: #FBBF24; }
+    [data-theme="dark"] .cmp-flash.err, [data-theme="dark"] .cmp-btn.danger, [data-theme="dark"] .cmp-card-actions button { color: #F87171; }
+    .cmp-card, .cmp-btn, .cmp-tab, .cmp-input { transition: background-color .15s ease, color .15s ease, border-color .15s ease, box-shadow .2s ease, transform .15s ease; }
+    .cmp-card:hover { transform: translateY(-2px); }
+    @media (prefers-reduced-motion: reduce) { .cmp-card, .cmp-btn, .cmp-tab { transition: none; transform: none; } }
+</style>
+
+<div class="main-content">
+  <div class="compare-page">
+
+    <?php if (!$loggedIn): ?>
+      <section class="cmp-hero">
+        <h1><?= melkinoSvgIcon('scale') ?> مقایسهٔ <span>ملک‌ها</span></h1>
+        <p>
+          مقایسهٔ ملک‌ها فقط برای کاربران وارد‌شده در دسترس است؛ می‌توانید ۲ تا ۵ ملک
+          <strong>هم‌نوع</strong> را کنار هم بگذارید و امتیازهای شفاف ببینید.
+        </p>
+      </section>
+      <div class="cmp-flash warn" style="margin-top:14px;line-height:2.3;">
+        <?= melkinoSvgIcon('key') ?> برای افزودن ملک به مقایسه و دیدن نتیجهٔ مقایسه، اول وارد حساب کاربری شوید.<br>
+        <a href="login.php" style="color:var(--primary,#0b5d5b);font-weight:800;">ورود / ثبت‌نام →</a>
+      </div>
+    <?php else: ?>
+    <section class="cmp-hero">
+      <h1><?= melkinoSvgIcon('scale') ?> مقایسهٔ <span>ملک‌ها</span></h1>
+      <p>
+        تا <?= (int)$maxPerGroup ?> ملک در هر دسته؛ خودت انتخاب کن کدام ملک‌ها با هم مقایسه شوند.
+        <?= $total > 0 ? 'در حال حاضر ' . (int)$total . ' ملک در مقایسه داری.' : 'از روی کارت هر ملک دکمهٔ ' . melkinoSvgIcon('scale') . ' مقایسه را بزن.' ?>
+      </p>
+    </section>
+
+    <?php if ($flash !== ''): ?>
+      <div class="cmp-flash <?= htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8') === 'ok' ? 'ok' : (htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8') === 'warn' ? 'warn' : 'err') ?>">
+        <?= htmlspecialchars($flash, ENT_QUOTES, 'UTF-8') ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($tableError !== ''): ?>
+      <div class="cmp-flash err"><?= htmlspecialchars($tableError, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+
+    <div class="cmp-tabs">
+      <?php foreach ($groups as $g): ?>
+        <a class="cmp-tab<?= (int)$g['no'] === $activeGroupNo ? ' active' : '' ?>"
+           href="compare-page.php?group=<?= (int)$g['no'] ?>">
+          <span><?= htmlspecialchars((string)$g['name'], ENT_QUOTES, 'UTF-8') ?></span>
+          <span class="badge"><?= (int)$g['count'] ?>/<?= (int)$maxPerGroup ?></span>
+        </a>
+      <?php endforeach; ?>
+    </div>
+
+    <div class="cmp-toolbar">
+      <form method="post" action="compare-page.php">
+        <input type="hidden" name="action" value="rename">
+        <input type="hidden" name="group" value="<?= (int)$activeGroupNo ?>">
+        <input class="cmp-input" type="text" name="name" maxlength="40"
+               value="<?= htmlspecialchars((string)$activeGroup['name'], ENT_QUOTES, 'UTF-8') ?>"
+               placeholder="نام این دسته (مثلاً «آپارتمان‌های ۱۰۰ متری»)">
+        <button class="cmp-btn" type="submit"><?= melkinoSvgIcon('edit') ?> ذخیرهٔ نام</button>
+      </form>
+      <?php if ((int)$activeGroup['count'] > 0): ?>
+        <form method="post" action="compare-page.php" onsubmit="return confirm('همهٔ ملک‌های این دسته حذف شود؟');">
+          <input type="hidden" name="action" value="clear">
+          <input type="hidden" name="group" value="<?= (int)$activeGroupNo ?>">
+          <button class="cmp-btn danger" type="submit"><?= melkinoSvgIcon('trash') ?> خالی کردن دسته</button>
+        </form>
+      <?php endif; ?>
+    </div>
+
+    <?php if ((int)$activeGroup['count'] === 0): ?>
+      <div class="cmp-empty">
+        <div class="big"><?= melkinoSvgIcon('scale', 'mk-icon mk-icon--lg') ?></div>
+        <div>هنوز ملکی در «<?= htmlspecialchars((string)$activeGroup['name'], ENT_QUOTES, 'UTF-8') ?>» نیست.</div>
+        <div>از صفحهٔ <a href="properties.php" style="color:var(--primary);font-weight:800;">ملک‌ها</a> یا <a href="favorites.php" style="color:var(--primary);font-weight:800;">علاقه‌مندی‌ها</a> دکمهٔ «<?= melkinoSvgIcon('scale') ?> مقایسه» را بزن.</div>
+      </div>
+    <?php else: ?>
+      <div class="cmp-grid">
+        <?php foreach ($activeGroup['items'] as $item): ?>
+          <?php $img = $imageUrl($item); ?>
+          <article class="cmp-card">
+            <div class="cmp-card-img">
+              <?php if ($img !== ''): ?>
+                <img src="<?= htmlspecialchars($img, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars((string)($item['title'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" loading="lazy" onerror="this.onerror=null;this.style.display='none';var _p=this.parentNode.querySelector('.cmp-noimg');if(_p)_p.style.display='flex';var _b=this.parentNode.querySelector('.mk-decor-badge');if(_b)_b.style.display='none';">
+                <?php if ($melkinoIsDecor($item)): ?>
+                <span class="mk-decor-badge"><?= 'عکس تزیینی — مربوط به این ملک نیست' ?></span>
+                <?php endif; ?>
+                <span class="cmp-noimg" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;"><?= melkinoSvgIcon('image', 'mk-icon mk-icon--lg') ?></span>
+              <?php else: ?>
+                <?= melkinoSvgIcon('image', 'mk-icon mk-icon--lg') ?>
+              <?php endif; ?>
+            </div>
+            <div class="cmp-card-body">
+              <div class="cmp-card-title">
+                <a href="property-details.php?id=<?= urlencode((string)$item['id']) ?>">
+                  <?= htmlspecialchars(trim((string)($item['title'] ?? '')) !== '' ? (string)$item['title'] : 'ملک بدون عنوان', ENT_QUOTES, 'UTF-8') ?>
+                </a>
+              </div>
+              <div class="cmp-card-sub">کد: <?= htmlspecialchars((string)$item['id'], ENT_QUOTES, 'UTF-8') ?></div>
+              <div class="cmp-chips">
+                <?php if (!empty($item['transaction_type'])): ?><span class="cmp-chip"><?= htmlspecialchars((string)$item['transaction_type'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                <?php if (!empty($item['property_type'])): ?><span class="cmp-chip"><?= htmlspecialchars((string)$item['property_type'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                <?php if (!empty($item['location'])): ?><span class="cmp-chip"><?= melkinoSvgIcon('pin', 'mk-icon mk-icon--sm') ?> <?= htmlspecialchars((string)$item['location'], ENT_QUOTES, 'UTF-8') ?></span><?php endif; ?>
+                <?php if (!empty($item['area'])): ?><span class="cmp-chip"><?= $numFa($item['area']) ?> متر</span><?php endif; ?>
+                <?php if (!empty($item['rooms'])): ?><span class="cmp-chip"><?= $numFa($item['rooms']) ?> خواب</span><?php endif; ?>
+              </div>
+              <div class="cmp-card-price"><?= htmlspecialchars($priceText($item), ENT_QUOTES, 'UTF-8') ?></div>
+              <div class="cmp-card-actions">
+                <form method="post" action="compare-page.php" style="display:flex;gap:6px;flex:1 1 100%;">
+                  <input type="hidden" name="action" value="move">
+                  <input type="hidden" name="ad_id" value="<?= htmlspecialchars((string)$item['id'], ENT_QUOTES, 'UTF-8') ?>">
+                  <select name="target_group" onchange="this.form.submit()" aria-label="انتقال به دستهٔ دیگر">
+                    <option value="">انتقال به…</option>
+                    <?php foreach ($groups as $g): ?>
+                      <?php if ((int)$g['no'] !== $activeGroupNo): ?>
+                        <option value="<?= (int)$g['no'] ?>"><?= htmlspecialchars((string)$g['name'], ENT_QUOTES, 'UTF-8') ?></option>
+                      <?php endif; ?>
+                    <?php endforeach; ?>
+                  </select>
+                </form>
+                <form method="post" action="compare-page.php" style="display:flex;flex:1 1 100%;">
+                  <input type="hidden" name="action" value="remove">
+                  <input type="hidden" name="ad_id" value="<?= htmlspecialchars((string)$item['id'], ENT_QUOTES, 'UTF-8') ?>">
+                  <input type="hidden" name="group" value="<?= (int)$activeGroupNo ?>">
+                  <button type="submit" style="flex:1;"><?= melkinoSvgIcon('x') ?> حذف از مقایسه</button>
+                </form>
+              </div>
+            </div>
+          </article>
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($scoreData !== null): ?>
+      <?php
+        $eng = $scoreData['engine'] ?? null;
+        $adById = [];
+        foreach ($scoreData['ads'] as $ad) {
+            $adById[(string)$ad['id']] = $ad;
+        }
+      ?>
+      <?php if ($eng): ?>
+      <div class="cmp-warn" style="margin-top:14px;line-height:2.1;">
+        <?= melkinoSvgIcon('warn', 'mk-icon mk-icon--sm') ?> <?= htmlspecialchars($eng['disclaimer'], ENT_QUOTES, 'UTF-8') ?>
+      </div>
+
+      <div class="cmp-section-title"><?= melkinoSvgIcon('chart') ?> خلاصهٔ مقایسه — <?= htmlspecialchars((string)$eng['type'], ENT_QUOTES, 'UTF-8') ?></div>
+      <div class="cmp-score-wrap">
+        <table class="cmp-table">
+          <thead>
+            <tr>
+              <th>ملک</th>
+              <th>امتیاز کلی</th>
+              <th>ارزش خرید</th>
+              <th>ریسک (بالاتر = کم‌ریسک‌تر)</th>
+              <th>اطمینان</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($eng['ads'] as $ea): ?>
+            <tr>
+              <th style="text-align:right;white-space:normal;"><?= htmlspecialchars($cut($ea['title'], 26), ENT_QUOTES, 'UTF-8') ?></th>
+              <td class="total"><?= $ea['scores']['overall'] !== null ? htmlspecialchars((string)$ea['scores']['overall'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+              <td><?= $ea['scores']['value'] !== null ? htmlspecialchars((string)$ea['scores']['value'], ENT_QUOTES, 'UTF-8') : '—' ?></td>
+              <td><?= htmlspecialchars((string)$ea['scores']['risk'], ENT_QUOTES, 'UTF-8') ?></td>
+              <td><?= (int)$ea['scores']['confidence'] ?>٪</td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+
+      <?php foreach ($eng['ads'] as $ea): ?>
+        <details class="cmp-highlights" style="margin-top:10px;">
+          <summary style="cursor:pointer;font-weight:800;"><?= melkinoSvgIcon('search') ?> شکافت امتیاز — <?= htmlspecialchars($cut($ea['title'], 30), ENT_QUOTES, 'UTF-8') ?></summary>
+          <div class="cmp-score-wrap" style="margin-top:8px;">
+            <table class="cmp-table">
+              <thead><tr><th>معیار</th><th>مقدار ثبت‌شده</th><th>امتیاز (از ۱۰)</th></tr></thead>
+              <tbody>
+                <?php foreach ($ea['breakdown'] as $b): ?>
+                <tr>
+                  <th><?= htmlspecialchars((string)$b['label'], ENT_QUOTES, 'UTF-8') ?></th>
+                  <td><?= htmlspecialchars((string)$b['value'], ENT_QUOTES, 'UTF-8') ?></td>
+                  <td><?= $b['score'] === null ? 'ثبت نشده (نامعلوم ≠ ندارد)' : htmlspecialchars((string)$b['score'], ENT_QUOTES, 'UTF-8') ?></td>
+                </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      <?php endforeach; ?>
+
+      <?php if ($eng['differences']): ?>
+      <div class="cmp-section-title"><?= melkinoSvgIcon('shuffle') ?> تفاوت‌های اصلی</div>
+      <div class="cmp-highlights">
+        <?php foreach ($eng['differences'] as $d): ?>
+          <?php
+            $parts = [];
+            foreach ($d['ads'] as $did => $info) {
+                $t = isset($adById[$did]) ? $cut($adById[$did]['title'] ?? '', 16) : $did;
+                $parts[] = $t . ' = ' . $info['value'] . ' (امتیاز ' . ($info['score'] === null ? '—' : $info['score']) . ')';
+            }
+          ?>
+          <b><?= htmlspecialchars((string)$d['label'], ENT_QUOTES, 'UTF-8') ?>:</b>
+          <?= htmlspecialchars(implode(' | ', $parts), ENT_QUOTES, 'UTF-8') ?><br>
+        <?php endforeach; ?>
+      </div>
+      <?php endif; ?>
+
+      <div class="cmp-section-title"><?= melkinoSvgIcon('sparkles') ?> نقاط قوت و ضعف هر ملک</div>
+      <div class="cmp-grid">
+        <?php foreach ($eng['ads'] as $ea): ?>
+        <div class="cmp-highlights">
+          <b><?= htmlspecialchars($cut($ea['title'], 24), ENT_QUOTES, 'UTF-8') ?></b><br>
+          <?= melkinoSvgIcon('check') ?> <?= ($eng['strengths'][$ea['id']] ?? []) ? htmlspecialchars(implode('، ', $eng['strengths'][$ea['id']]), ENT_QUOTES, 'UTF-8') : 'نقطهٔ قوت برجسته‌ای در داده‌ها نیست' ?><br>
+          <?= melkinoSvgIcon('warn', 'mk-icon mk-icon--sm') ?> <?= ($eng['weaknesses'][$ea['id']] ?? []) ? htmlspecialchars(implode('، ', $eng['weaknesses'][$ea['id']]), ENT_QUOTES, 'UTF-8') : 'مورد ضعف برجسته‌ای در داده‌ها نیست' ?>
+        </div>
+        <?php endforeach; ?>
+      </div>
+
+      <div class="cmp-note" style="margin-top:12px;line-height:2.1;">
+        <?= melkinoSvgIcon('calc') ?> معیارهای استفاده‌شده در امتیاز: <?= htmlspecialchars(implode('، ', $eng['criteria_used']), ENT_QUOTES, 'UTF-8') ?><br>
+        <?php if ($eng['no_data_note'] !== ''): ?>
+          <?= melkinoSvgIcon('inbox') ?> <?= htmlspecialchars($eng['no_data_note'], ENT_QUOTES, 'UTF-8') ?>
+          (<?= htmlspecialchars(implode('، ', array_slice($eng['criteria_no_data'], 0, 10)), ENT_QUOTES, 'UTF-8') ?>)
+        <?php endif; ?>
+      </div>
+
+      <div class="cmp-highlights" style="margin-top:10px;font-size:12px;">
+        <?= melkinoSvgIcon('receipt') ?> <?= htmlspecialchars((string)$eng['conclusion'], ENT_QUOTES, 'UTF-8') ?>
+      </div>
+
+      <?php if (!empty($eng['mixed_types'])): ?>
+        <div class="cmp-warn" style="margin-top:10px;">
+          <?= melkinoSvgIcon('warn', 'mk-icon mk-icon--sm') ?> ملک‌های این دسته هم‌نوع نیستند (ثبت‌شده پیش از قانون جدید). مقایسه فقط بین فیلدهای مشترک معتبر است؛
+          از این به بعد هر دسته فقط یک نوع ملک می‌پذیرد.
+        </div>
+      <?php endif; ?>
+      <?php endif; ?>
+    <?php elseif ($scoreError !== ''): ?>
+      <div class="cmp-flash warn" style="margin-top:14px;"><?= htmlspecialchars($scoreError, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+
+    <?php endif; ?>
+  </div>
+</div>
+
+<?php require_once __DIR__ . '/footer.php'; ?>

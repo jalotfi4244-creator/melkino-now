@@ -1,0 +1,133 @@
+.mk-map-page{display:flex;flex-direction:column;height:calc(100vh - 120px);min-height:520px;background:var(--bg,#0d1413);color:var(--text-primary,#f3f4f6);padding-bottom:calc(var(--bottom-nav-height,75px) + env(safe-area-inset-bottom,0px))}
+.mk-map-toolbar{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border,rgba(212,175,55,.2));background:linear-gradient(135deg,#073737,#052727)}
+.mk-map-title{font-weight:900;color:#f0d36a;font-size:13px}
+.mk-map-tx{display:flex;gap:6px}
+.mk-chip{flex:1;height:32px;padding:0 6px;border-radius:9px;border:1px solid rgba(212,175,55,.28);background:#042e2e;color:#e8efe9;font-family:inherit;font-size:12px;font-weight:800;cursor:pointer}
+.mk-chip.is-on{background:#d4af37;color:#1a1a1a;border-color:#d4af37}
+.mk-map-types{border-radius:10px;background:#031c1c;border:1px solid rgba(212,175,55,.18)}
+.mk-map-types summary{list-style:none;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:12px;font-weight:800;color:#f0d36a;cursor:pointer}
+.mk-map-types summary::-webkit-details-marker{display:none}
+.mk-map-types summary:after{content:"▾";color:#f0d36a}
+.mk-map-types[open] summary:after{content:"▴"}
+.mk-map-types-list{display:flex;flex-wrap:wrap;gap:6px;padding:0 8px 8px}
+.mk-map-types-list .mk-chip{flex:0 1 calc(33.33% - 6px);min-width:72px}
+.mk-map-btn{height:40px;padding:0 12px;border-radius:10px;border:1px solid rgba(212,175,55,.3);background:#064e4e;color:#fff;font-family:inherit;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.mk-map-btn.gold{background:#d4af37;color:#1a1a1a}
+.mk-map-body{flex:1;display:flex;min-height:0}
+#mkMapCanvas{flex:1;min-height:360px}
+.mk-map-sheet{position:fixed;right:8px;left:8px;bottom:calc(var(--bottom-nav-height, 78px) + env(safe-area-inset-bottom, 0px) + 10px);z-index:10060;background:#10201f;border:1px solid #d4af37;border-radius:18px;padding:10px 12px 12px;max-height:38vh;overflow:auto;box-shadow:0 16px 40px rgba(0,0,0,.35)}
+.mk-map-sheet-close{float:left;height:28px;padding:0 10px;border:0;border-radius:10px;background:#064e4e;color:#fff;font-family:inherit;font-weight:800;cursor:pointer;font-size:12px}
+.mk-map-sheet-body{display:flex;gap:10px;align-items:flex-start;clear:both}
+.mk-map-thumb{width:88px;height:88px;object-fit:cover;border-radius:12px;flex:0 0 88px}
+.mk-map-sheet-copy{min-width:0;flex:1}
+.mk-map-sheet-copy strong{display:block;font-size:14px}
+.mk-map-kind{margin:4px 0;font-size:12px;color:#f0d36a;font-weight:800}
+.mk-map-price{margin:4px 0 8px;color:#d4af37;font-weight:900;font-size:13px}
+.mk-amen-row{display:flex;gap:6px;margin:6px 0}
+.mk-amen{display:inline-flex;align-items:center;gap:4px;padding:4px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.18);color:#6b7c7a;opacity:.4;font-size:10px;font-weight:800}
+.mk-amen.is-on{opacity:1;color:#d4af37;border-color:#d4af37;background:rgba(212,175,55,.12)}
+.mk-amen i{font-style:normal}
+@media(max-width:680px){
+  .mk-map-thumb{width:64px;height:64px;flex-basis:64px}
+  .mk-map-sheet{padding:8px 10px;max-height:34vh}
+  .mk-map-sheet-copy strong{font-size:13px}
+}
+.mk-pin-wrap{background:transparent!important;border:0!important}
+.mk-pin{display:block;width:22px;height:22px;margin:6px auto 0;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+@media(max-width:800px){
+  .mk-map-page{height:calc(100vh - 90px)}
+  .mk-map-title{width:100%;margin:0}
+}
+
+/* ===== مارکرهای طراحی‌پذیر (شکل از استودیو طراحی) ===== */
+.mk-mk{display:block;position:relative;line-height:0}
+.mk-mk svg{width:100%;height:100%;display:block}
+.mk-mk.has-shadow svg{filter:drop-shadow(0 3px 6px rgba(0,0,0,.35))}
+.mk-mk-label{position:absolute;bottom:100%;right:50%;transform:translateX(50%);margin-bottom:4px;
+  background:rgba(8,26,26,.92);color:#fff;border:1px solid rgba(212,175,55,.6);border-radius:9px;
+  padding:2px 7px;font-size:11px;font-weight:800;white-space:nowrap;line-height:1.5;pointer-events:none}
+@keyframes mkMkPulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+.mk-mk.is-pulse svg{animation:mkMkPulse 1.6s ease-in-out infinite;transform-origin:50% 90%}
+
+/* موقعیت کارت بازشونده روی نقشه */
+.mk-map-sheet[data-pos="top"]{bottom:auto;top:calc(var(--header-height, 64px) + 10px)}
+.mk-map-sheet[data-pos="center"]{bottom:auto;top:50%;transform:translateY(-50%)}
+
+/* =========================================================
+   مدل‌های آمادهٔ کارت نقشه (از استودیو طراحی انتخاب می‌شود)
+   هر مدل فقط ظاهر است؛ ساختار و محتوای کارت تغییر نمی‌کند.
+   ========================================================= */
+.mk-map-sheet{color:#fff}
+.mk-map-sheet-copy strong{color:inherit}
+
+/* ۱) کلاسیک ملکینو (پیش‌فرض فعلی) */
+.mk-map-sheet[data-skin="classic"]{background:#10201f;border:1px solid #d4af37}
+
+/* ۲) طلایی رویال — کرم روشن با قاب دوخط طلا */
+.mk-map-sheet[data-skin="gold"]{
+  background:linear-gradient(160deg,#fffdf6,#f7efdc);color:#153434;
+  border:1px solid #d4af37;box-shadow:0 18px 44px rgba(120,95,20,.22),inset 0 0 0 4px rgba(212,175,55,.16)}
+.mk-map-sheet[data-skin="gold"] .mk-map-kind{color:#8a6d1f}
+.mk-map-sheet[data-skin="gold"] .mk-map-price{color:#9a7a14;font-size:15px}
+.mk-map-sheet[data-skin="gold"] .mk-map-btn.gold{background:linear-gradient(180deg,#e7c75a,#c9a227);color:#1a1a1a;border-color:#b9932a}
+.mk-map-sheet[data-skin="gold"] .mk-map-sheet-close{background:#153434}
+.mk-map-sheet[data-skin="gold"] .mk-amen{border-color:rgba(21,52,52,.2);color:#6b6350}
+.mk-map-sheet[data-skin="gold"] .mk-amen.is-on{color:#8a6d1f;border-color:#c9a227;background:rgba(212,175,55,.14)}
+.mk-map-sheet[data-skin="gold"] .mk-map-thumb{box-shadow:0 6px 16px rgba(120,95,20,.25)}
+
+/* ۳) نوآر — مشکی مات با خط طلایی نازک */
+.mk-map-sheet[data-skin="noir"]{
+  background:linear-gradient(180deg,#141414,#0b0b0b);color:#f4f1e8;
+  border:1px solid rgba(212,175,55,.55);box-shadow:0 22px 50px rgba(0,0,0,.6)}
+.mk-map-sheet[data-skin="noir"] .mk-map-kind{color:#cfc6a8;letter-spacing:.3px}
+.mk-map-sheet[data-skin="noir"] .mk-map-price{color:#e8c86a;font-size:15px}
+.mk-map-sheet[data-skin="noir"] .mk-map-btn.gold{background:transparent;color:#e8c86a;border:1px solid #e8c86a}
+.mk-map-sheet[data-skin="noir"] .mk-map-sheet-close{background:#262626;color:#e8c86a}
+.mk-map-sheet[data-skin="noir"] .mk-map-thumb{filter:saturate(.92) contrast(1.05)}
+
+/* ۴) شیشه‌ای — بلور شفاف روی نقشه */
+.mk-map-sheet[data-skin="glass"]{
+  background:rgba(12,32,32,.55);color:#f2fbfa;border:1px solid rgba(255,255,255,.28);
+  -webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);
+  box-shadow:0 18px 44px rgba(0,0,0,.35)}
+.mk-map-sheet[data-skin="glass"] .mk-map-kind{color:#bfe9e4}
+.mk-map-sheet[data-skin="glass"] .mk-map-price{color:#ffe9a8}
+.mk-map-sheet[data-skin="glass"] .mk-map-btn.gold{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.4)}
+.mk-map-sheet[data-skin="glass"] .mk-map-sheet-close{background:rgba(255,255,255,.18)}
+
+/* ۵) مینیمال سفید */
+.mk-map-sheet[data-skin="white"]{
+  background:#fff;color:#12201f;border:1px solid rgba(6,78,78,.12);box-shadow:0 14px 34px rgba(6,78,78,.14)}
+.mk-map-sheet[data-skin="white"] .mk-map-kind{color:#5b6b69}
+.mk-map-sheet[data-skin="white"] .mk-map-price{color:#064e4e;font-size:15px}
+.mk-map-sheet[data-skin="white"] .mk-map-btn.gold{background:#064e4e;color:#fff;border-color:#064e4e}
+.mk-map-sheet[data-skin="white"] .mk-map-sheet-close{background:#eef4f3;color:#12201f}
+.mk-map-sheet[data-skin="white"] .mk-amen{border-color:rgba(6,78,78,.16);color:#8b9997}
+.mk-map-sheet[data-skin="white"] .mk-amen.is-on{color:#064e4e;border-color:#064e4e;background:rgba(6,78,78,.08)}
+
+/* ۶) زمردی — گرادیان سبز لوکس */
+.mk-map-sheet[data-skin="emerald"]{
+  background:linear-gradient(145deg,#064e4e,#0b7c6e 60%,#0f9b84);color:#effffb;
+  border:1px solid rgba(212,175,55,.5);box-shadow:0 20px 46px rgba(6,78,78,.45)}
+.mk-map-sheet[data-skin="emerald"] .mk-map-kind{color:#c9f3ea}
+.mk-map-sheet[data-skin="emerald"] .mk-map-price{color:#ffe08a;font-size:15px}
+.mk-map-sheet[data-skin="emerald"] .mk-map-btn.gold{background:#ffd775;color:#0b3b36}
+.mk-map-sheet[data-skin="emerald"] .mk-map-sheet-close{background:rgba(0,0,0,.28)}
+
+/* ۷) نوار فشرده — کم‌ارتفاع برای موبایل */
+.mk-map-sheet[data-skin="strip"]{
+  background:#0f1e1d;color:#f2fbfa;border:1px solid rgba(212,175,55,.35);border-radius:14px;padding:8px 10px}
+.mk-map-sheet[data-skin="strip"] .mk-map-thumb{width:60px;height:60px;flex-basis:60px;border-radius:10px}
+.mk-map-sheet[data-skin="strip"] .mk-amen-row{display:none}
+.mk-map-sheet[data-skin="strip"] .mk-map-price{margin:2px 0 6px;font-size:13px}
+.mk-map-sheet[data-skin="strip"] .mk-map-btn{height:32px;font-size:12px}
+
+/* ۸) پوستری — عکس تمام‌عرض بالای کارت */
+.mk-map-sheet[data-skin="poster"]{
+  background:#101f1e;color:#f6fffd;border:1px solid rgba(212,175,55,.45);padding:0 0 12px;overflow:hidden}
+.mk-map-sheet[data-skin="poster"] .mk-map-sheet-close{position:absolute;top:8px;left:8px;float:none;z-index:3;background:rgba(0,0,0,.55)}
+.mk-map-sheet[data-skin="poster"] .mk-map-sheet-body{display:block}
+.mk-map-sheet[data-skin="poster"] .mk-map-thumb{width:100%;flex-basis:auto;border-radius:0;display:block}
+.mk-map-sheet[data-skin="poster"] .mk-map-sheet-copy{padding:10px 12px 0}
+.mk-map-sheet[data-skin="poster"] .mk-map-price{color:#ffdf8d;font-size:15px}
+.mk-map-sheet[data-skin="poster"] .mk-map-btn.gold{width:100%}
