@@ -170,7 +170,7 @@ function getFilteredAds() {
             ad => {
 
                 if (adViewState.filter === 'vip') {
-                    if (!(ad.is_vip === true || ad.is_vip === 1 || String(ad.is_vip) === '1')) return false;
+                    if (!(ad.is_vip === true || ad.is_vip === '1')) return false;
                 } else if (
                     adViewState.filter !==
                     'all' &&
@@ -471,38 +471,6 @@ function renderAds() {
                         }
 
 
-                        // [PARTNERSHIP] تأیید/رد مثل بقیه (فقط بدون انتشار در کانال)
-                        if (ad.is_partnership) {
-                            primaryAction = ad.status === 'pending'
-                                ? `
-<button
-    class="table-action primary"
-    title="تایید درخواست"
-    onclick="event.stopPropagation(); approveAd('${ad.id}')"
->
-    ${MK_IC.check}
-</button>
-<button
-    class="table-action"
-    title="رد درخواست"
-    style="color:var(--danger,#b00020);"
-    onclick="event.stopPropagation(); rejectAd('${ad.id}')"
->
-    ${MK_IC.x}
-</button>
-`
-                                : `
-<button
-    class="table-action"
-    title="تغییر به «در حال بررسی»"
-    onclick="event.stopPropagation(); changeAdStatus('${ad.id}','reviewing')"
->
-    ${MK_IC.lock}
-</button>
-`;
-                        }
-
-
                         // نشانگرهای انتشار در کانال (راند ۱۸)
                         const tgPub = ad.telegram_published_at ? String(ad.telegram_published_at) : '';
                         const balePub = ad.bale_published_at ? String(ad.bale_published_at) : '';
@@ -516,10 +484,7 @@ function renderAds() {
 <tr>
 
 <td>
-${
-    ad.is_partnership
-        ? ''
-        : `
+
 <input
     class="selection-check ad-select"
     type="checkbox"
@@ -531,8 +496,7 @@ ${
     }
     onchange="toggleAdSelection('${ad.id}', this.checked)"
 >
-`
-}
+
 </td>
 
 
@@ -605,7 +569,12 @@ ${ad.is_vip ? '<span class="ad-vip-pill">' + MK_IC.star + ' VIP</span>' : ''}${c
 
 <strong>
     ${escapeHtml(
-        getAdPriceCell(ad)
+        getDisplayPrice(ad)
+            .replace(
+                /^.+?: /,
+                ''
+            ) ||
+        '-'
     )}
 </strong>
 
@@ -1201,24 +1170,28 @@ async function bulkDeleteAds() {
     }
 
 
-    const phrases = ids
-        .map(id => (typeof adsData !== 'undefined' ? adsData : []).find(a => String(a.id) === String(id)))
-        .map(adDeletePhrase);
-    const preview = phrases.slice(0, 6).join('؛ ');
-    const extra = phrases.length > 6 ? ' و …' : '';
     if (
         !confirm(
-            `آیا از حذف ${ids.length} آگهی (${preview}${extra}) مطمئنید؟ این عملیات قابل بازگشت نیست.`
+            `آیا ${ids.length} آگهی انتخاب‌شده حذف شوند؟ این عملیات قابل بازگشت نیست.`
         )
     ) {
         return;
     }
 
 
-    const ok = await deleteAdsOnServer(ids);
-    if (!ok) return;
+    adsData =
+        adsData.filter(
+            ad =>
+                !ids.includes(
+                    String(ad.id)
+                )
+        );
+
 
     adViewState.selected.clear();
+
+
+    await saveAdsToFile();
 
 
     renderAds();
@@ -1246,9 +1219,7 @@ async function approveAd(id) {
 
 
     ad.status =
-        ad.is_partnership
-            ? 'approved'
-            : 'published';
+        'published';
 
 
     await saveAdsToFile([ad]);
@@ -1335,22 +1306,7 @@ async function changeAdStatus(
             'رد شده',
 
         published:
-            'منتشر شده',
-
-        approved:
-            'تأیید شد',
-
-        reviewing:
-            'در حال بررسی',
-
-        contacted:
-            'تماس گرفته شد',
-
-        offer:
-            'پیشنهاد داده شد',
-
-        done:
-            'توافق شد'
+            'منتشر شده'
     };
 
 
@@ -1381,80 +1337,26 @@ async function changeAdStatus(
 }
 
 
-async function deleteAdsOnServer(ids) {
-    const list = (Array.isArray(ids) ? ids : [ids]).map(id => String(id)).filter(Boolean);
-    if (!list.length) return false;
-    const response = await fetch(
-        window.location.pathname + '?ad_db_action=delete',
-        {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            cache: 'no-store',
-            credentials: 'same-origin',
-            body: JSON.stringify({ ids: list })
-        }
-    );
-    const raw = await response.text();
-    let result = null;
-    try {
-        result = JSON.parse(String(raw || '').trim());
-    } catch (e) {
-        const first = raw.indexOf('{');
-        const last = raw.lastIndexOf('}');
-        if (first >= 0 && last > first) {
-            try { result = JSON.parse(raw.slice(first, last + 1)); } catch (e2) {}
-        }
-    }
-    if (!response.ok || !result || result.ok !== true) {
-        alert((result && result.message) || 'حذف آگهی در سرور انجام نشد.');
-        return false;
-    }
-    const gone = new Set(list);
-    adsData = adsData.filter(a => !gone.has(String(a.id)));
-    return true;
-}
-
-function adDeletePhrase(ad) {
-    if (!ad) return 'این آگهی';
-    let details = ad.property_details;
-    if (typeof details === 'string') {
-        try { details = JSON.parse(details); } catch (e) { details = {}; }
-    }
-    if (!details || typeof details !== 'object') details = {};
-    const rawArea =
-        details.area ??
-        details.area_apt ??
-        details.built_area ??
-        details.land_area ??
-        details.building_area ??
-        ad.area ??
-        ad.built_area ??
-        ad.land_area ??
-        '';
-    const areaNum = rawArea !== '' && rawArea !== null && rawArea !== undefined
-        ? String(typeof normalizeNumberText === 'function' ? normalizeNumberText(rawArea) : rawArea).trim()
-        : '';
-    const loc = String(ad.location || details.location || '').trim();
-    const owner = String(ad.last_name || ad.owner_name || '').trim();
-    const bits = [];
-    if (areaNum && areaNum !== '-') bits.push(areaNum + ' متری');
-    if (loc) bits.push(loc);
-    if (owner) bits.push('مالک ' + owner);
-    if (!bits.length) bits.push(String(ad.title || ('شماره ' + (ad.id || ''))).trim() || 'این آگهی');
-    return bits.join(' ');
-}
-
 async function deleteAd(id) {
-    const ad = (typeof adsData !== 'undefined' ? adsData : []).find(a => String(a.id) === String(id));
-    if (!confirm('آیا از حذف آگهی ' + adDeletePhrase(ad) + ' مطمئنید؟')) {
+
+    if (
+        !confirm(
+            'حذف شود؟'
+        )
+    ) {
         return;
     }
 
-    const ok = await deleteAdsOnServer([id]);
-    if (!ok) return;
+
+    adsData =
+        adsData.filter(
+            a =>
+                a.id != id
+        );
+
+
+    await saveAdsToFile();
+
 
     renderAds();
 
@@ -2883,13 +2785,7 @@ function showAdDetails(id) {
     }
 
 
-        // [PARTNERSHIP] جزئیات درخواست مشارکت — همان مودال، همان کلاس‌ها
-    if (ad.is_partnership) {
-        showPartnershipDetails(ad);
-        return;
-    }
-
-const details =
+    const details =
         normalizeJsonObject(
             ad.property_details
         );
@@ -2945,7 +2841,7 @@ const details =
         priceRows.push(
             [
                 'قیمت فروش',
-                mkpHasPrice(ad.price_sell) ? mkpFormatPrice(ad.price_sell) : '-'
+                ad.price_sell !== null && ad.price_sell !== undefined && Number(ad.price_sell) > 0 ? normalizeNumberText(ad.price_sell) : '-'
             ],
             [
                 'وضعیت قیمت',
@@ -2975,7 +2871,7 @@ const details =
             priceRows.push(
                 [
                     'رهن کامل',
-                    mkpHasPrice(ad.full_rent) ? mkpFormatPrice(ad.full_rent) : '-'
+                    ad.full_rent !== null && ad.full_rent !== undefined && Number(ad.full_rent) > 0 ? normalizeNumberText(ad.full_rent) : '-'
                 ]
             );
 
@@ -2984,12 +2880,12 @@ const details =
             priceRows.push(
                 [
                     'ودیعه',
-                    mkpHasPrice(ad.deposit) ? mkpFormatPrice(ad.deposit) : '-'
+                    ad.deposit !== null && ad.deposit !== undefined && Number(ad.deposit) > 0 ? normalizeNumberText(ad.deposit) : '-'
                 ],
 
                 [
                     'اجاره ماهانه',
-                    mkpHasPrice(ad.rent_monthly) ? mkpFormatPrice(ad.rent_monthly) : '-'
+                    ad.rent_monthly !== null && ad.rent_monthly !== undefined && Number(ad.rent_monthly) > 0 ? normalizeNumberText(ad.rent_monthly) : '-'
                 ]
             );
         }
@@ -3003,12 +2899,12 @@ const details =
 
             [
                 'قیمت کل',
-                mkpHasPrice(ad.total_price) ? mkpFormatPrice(ad.total_price) : '-'
+                ad.total_price !== null && ad.total_price !== undefined && Number(ad.total_price) > 0 ? normalizeNumberText(ad.total_price) : '-'
             ],
 
             [
                 'پیش‌پرداخت',
-                mkpHasPrice(ad.down_payment) ? mkpFormatPrice(ad.down_payment) : '-'
+                ad.down_payment !== null && ad.down_payment !== undefined && Number(ad.down_payment) > 0 ? normalizeNumberText(ad.down_payment) : '-'
             ],
 
             [
@@ -4508,14 +4404,6 @@ function openAdEditModal(
     }
 
 
-    // [PARTNERSHIP] درخواست‌های مشارکت در همان مودال ویرایش آگهی،
-    // با همان شِل و کلاس‌ها باز می‌شوند (فیلدهای مخصوص مشارکت).
-    if (ad.is_partnership) {
-        openPartnershipEditModal(ad);
-        return;
-    }
-
-
     window.__editAdId =
         ad.id;
 
@@ -4869,14 +4757,6 @@ ${
     ad.address
 )}</textarea>
 
-</div>
-
-<div class="edit-field full">
-<label>موقعیت روی نقشه</label>
-<input type="hidden" id="editAdLat" value="${editEsc(ad.latitude || '')}">
-<input type="hidden" id="editAdLng" value="${editEsc(ad.longitude || '')}">
-<div id="editAdMap" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid var(--border);"></div>
-<p style="font-size:12px;color:var(--text-secondary);margin:6px 0 0;">برای تعیین موقعیت روی نقشه بزنید یا Marker را بکشید.</p>
 </div>
 
 </div>
@@ -5780,9 +5660,6 @@ ${selected.length}
 
 
     updateEditImageCounter();
-    if (typeof mkInitAdminEditMap === 'function') {
-        mkInitAdminEditMap(ad);
-    }
 }
 
 
@@ -5873,24 +5750,6 @@ async function adminCreateNewAd() {
         adsData.unshift(newAd);
         renderAds();
         renderDashboard();
-
-        // کارت‌های آمار سمت سرور رندر می‌شوند؛ آگهی تازه را همین‌جا
-        // به شمارنده‌ها اضافه کنیم تا «شمرده نشدن» دیده نشود.
-        if (Array.isArray(window.MELKINO_AD_TOTALS)) {
-            // ناسازگاری احتمالی نداریم؛ شیء است نه آرایه
-        }
-        if (window.MELKINO_AD_TOTALS && typeof window.MELKINO_AD_TOTALS === 'object') {
-            window.MELKINO_AD_TOTALS.total = (parseInt(window.MELKINO_AD_TOTALS.total, 10) || 0) + 1;
-            if (String(newAd.status || '') === 'published') {
-                window.MELKINO_AD_TOTALS.published = (parseInt(window.MELKINO_AD_TOTALS.published, 10) || 0) + 1;
-            }
-            const tEl = document.getElementById('adsStatTotal');
-            const pEl = document.getElementById('adsStatPublished');
-            if (tEl) tEl.textContent = parseInt(tEl.textContent.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)), 10) + 1;
-            if (pEl && String(newAd.status || '') === 'published') {
-                pEl.textContent = parseInt(pEl.textContent.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)), 10) + 1;
-            }
-        }
 
         openAdEditModal(newAd.id);
 
@@ -5993,12 +5852,6 @@ async function saveAdEdit() {
     }
 
 
-    // [PARTNERSHIP] ذخیرهٔ درخواست مشارکت از همان دکمهٔ «ذخیره تغییرات»
-    if (ad.is_partnership) {
-        return savePartnershipEdit(ad);
-    }
-
-
     const oldPublish =
         String(
             ad.publish_photos ||
@@ -6060,9 +5913,6 @@ async function saveAdEdit() {
             )
             .value
             .trim();
-
-    ad.latitude = (document.getElementById('editAdLat') || {}).value || ad.latitude || null;
-    ad.longitude = (document.getElementById('editAdLng') || {}).value || ad.longitude || null;
 
 
     ad.gender =
@@ -6490,22 +6340,7 @@ function getStatusLabel(
             'معلق',
 
         rejected:
-            'رد شده',
-
-        approved:
-            'تأیید شد',
-
-        reviewing:
-            'در حال بررسی',
-
-        contacted:
-            'تماس گرفته شد',
-
-        offer:
-            'پیشنهاد داده شد',
-
-        done:
-            'توافق شد'
+            'رد شده'
 
     };
 
@@ -6534,13 +6369,7 @@ function getStatusClass(
             'status-suspended',
 
         rejected:
-            'status-rejected',
-
-        approved:
-            'status-published',
-
-        done:
-            'status-published'
+            'status-rejected'
 
     };
 
@@ -6549,29 +6378,6 @@ function getStatusClass(
         'status-pending';
 }
 
-
-/* [PRICE] ارقام فارسی/عربی و جداکننده‌ها را به عدد انگلیسی تبدیل می‌کند
-   تا «۰» فارسی یا «۵,۰۰۰,۰۰۰» فارسی به‌عنوان قیمت واقعی تشخیص داده شود */
-function mkpToEnNumber(v) {
-    return String(v == null ? '' : v)
-        .replace(/[\u06F0-\u06F9]/g, function (d) { return String(d.charCodeAt(0) - 0x06F0); })
-        .replace(/[\u0660-\u0669]/g, function (d) { return String(d.charCodeAt(0) - 0x0660); })
-        .replace(/[,\s\u066C]/g, '');
-}
-
-function mkpHasPrice(v) {
-    var n = parseFloat(mkpToEnNumber(v));
-    return isFinite(n) && n > 0;
-}
-
-/* [PRICE] نمایش قیمت: فقط جداکنندهٔ سه‌رقمی — دقیقاً مثل صفحهٔ هوم
-   (number_format). هیچ تغییری در خودِ عدد داده نمی‌شود. */
-function mkpFormatPrice(v) {
-    var d = mkpToEnNumber(v).replace(/[^0-9]/g, '');
-    if (d === '') return String(v == null ? '' : v);
-    var n = parseInt(d, 10);
-    return isFinite(n) ? n.toLocaleString('en-US') : String(v);
-}
 
 function getDisplayPrice(
     ad
@@ -6582,68 +6388,55 @@ function getDisplayPrice(
     }
 
 
-    /* پیش فروش: قیمت مربوطه «قیمت کل» است */
     if (
-        ad.transaction_type ===
-        'پیش فروش'
-    ) {
-
-        if (
-            mkpHasPrice(ad.total_price)
-        ) {
-
-            return (
-                '📋 قیمت کل: ' +
-                mkpFormatPrice(ad.total_price) +
-                ' تومان'
-            );
-        }
-
-        return '';
-    }
-
-
-    if (
-        mkpHasPrice(ad.price_sell)
+        ad.price_sell &&
+        ad.price_sell !=
+            '0'
     ) {
 
         return (
             '💰 فروش: ' +
-            mkpFormatPrice(ad.price_sell) +
+            ad.price_sell +
             ' تومان'
         );
     }
 
 
     if (
-        mkpHasPrice(ad.total_price)
+        ad.total_price &&
+        ad.total_price !=
+            '0'
     ) {
 
         return (
             '📋 قیمت کل: ' +
-            mkpFormatPrice(ad.total_price) +
+            ad.total_price +
             ' تومان'
         );
     }
 
 
     if (
-        mkpHasPrice(ad.deposit)
+        ad.deposit &&
+        ad.deposit !=
+            '0'
     ) {
 
         let t =
             '🏠 ودیعه: ' +
-            mkpFormatPrice(ad.deposit) +
+            ad.deposit +
             ' تومان';
 
 
         if (
-            mkpHasPrice(ad.rent_monthly)
+            ad.rent_monthly &&
+            ad.rent_monthly !=
+                '0'
         ) {
 
             t +=
                 ' | اجاره: ' +
-                mkpFormatPrice(ad.rent_monthly) +
+                ad.rent_monthly +
                 ' تومان';
         }
 
@@ -6653,452 +6446,6 @@ function getDisplayPrice(
 
 
     return '';
-}
-
-
-// ==============================================
-// [PARTNERSHIP] سلول قیمت: درخواست‌های مشارکت و آگهی‌های
-// «مشارکت در ساخت» برچسب مخصوص می‌گیرند؛ آگهی‌های بدون قیمت
-// به‌جای «-» خالی، متن واضح می‌گیرند.
-// ==============================================
-function getAdPriceCell(ad) {
-    if (ad && (ad.is_partnership || String(ad.transaction_type || '').indexOf('مشارکت') !== -1)) {
-        return 'بدون قیمت';
-    }
-    var p = getDisplayPrice(ad).replace(/^.+?: /, '');
-    return p || 'قیمت ثبت نشده';
-}
-
-
-// ==============================================
-// [PRICE INPUT] ورودی‌های قیمت مودال ویرایش آگهی: جداکنندهٔ سه‌رقمی
-// هنگام تایپ — همان الگوی formatPrice فرم‌های ثبت ملک
-// ==============================================
-(function () {
-    const priceInputIds = ['editAdPriceSell', 'editAdDeposit', 'editAdRentMonthly', 'editAdTotalPrice', 'editAdDownPayment'];
-    document.addEventListener('input', function (e) {
-        if (!priceInputIds.includes(e.target && e.target.id)) return;
-        let v = String(e.target.value || '');
-        v = v.replace(/[\u06F0-\u06F9]/g, d => String(d.charCodeAt(0) - 0x06F0))
-             .replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660))
-             .replace(/[^0-9]/g, '');
-        if (v === '') { e.target.value = ''; return; }
-        e.target.value = parseInt(v, 10).toLocaleString('en-US');
-    });
-})();
-
-
-// ==============================================
-// [PARTNERSHIP] ویرایش و جزئیات درخواست «مشارکت در ساخت»
-// با همان شِل، تب‌ها و کلاس‌های مودال ویرایش/جزئیات آگهی‌ها
-// ==============================================
-
-const MKP_OPTS = {
-    property_types: ['زمین', 'خانه کلنگی', 'آپارتمان کلنگی', 'ملک تجاری', 'باغ / زمین با بنا', 'سایر'],
-    current_statuses: ['زمین خالی', 'خانه کلنگی', 'ساختمان قابل سکونت', 'ساختمان تجاری', 'سایر'],
-    br_counts: ['یک بر', 'دو بر', 'سه بر یا بیشتر', 'نمی‌دانم'],
-    directions: ['شمالی', 'جنوبی'],
-    permit_statuses: ['پروانه ندارم', 'در حال اخذ پروانه', 'پروانه صادر شده'],
-    deed_statuses: ['سند تک‌برگ', 'سند دفترچه‌ای', 'قولنامه‌ای', 'وکالتی', 'سایر', 'نمی‌دانم'],
-    deed_kinds: ['طلق', 'وقفی', 'مشاعی', 'سایر'],
-    occupancies: ['خالی', 'مالک ساکن است', 'مستأجر دارد', 'در حال تخلیه'],
-    legal_flags: ['در رهن است', 'در بازداشت است', 'پرونده حقوقی دارد', 'ورثه‌ای است', 'هیچ‌کدام', 'نمی‌دانم']
-};
-
-const MKP_STATUS_OPTS = [
-    ['pending', 'در انتظار بررسی'],
-    ['approved', 'تأیید شد'],
-    ['reviewing', 'در حال بررسی'],
-    ['contacted', 'تماس گرفته شد'],
-    ['offer', 'پیشنهاد داده شد'],
-    ['done', 'توافق شد'],
-    ['rejected', 'رد شده']
-];
-
-async function mkpFetchFull(ad) {
-    try {
-        const r = await fetch('admin-partnership.php?action=get&id=' + encodeURIComponent(ad.part_id), {
-            headers: { 'X-CSRF-Token': (window.MELKINO_CSRF || '') },
-            credentials: 'same-origin',
-            cache: 'no-store'
-        });
-        const j = await r.json();
-        if (j && j.success && j.row) return Object.assign({}, ad, j.row, { is_partnership: 1, part_id: ad.part_id });
-    } catch (e) { /* ردیف خلاصه کافی است */ }
-    return ad;
-}
-
-function mkpSel(id, list, val) {
-    return '<select id="' + id + '">' + list.map(v =>
-        '<option value="' + editEsc(v) + '"' + (String(val || '') === v ? ' selected' : '') + '>' + editEsc(v) + '</option>'
-    ).join('') + '</select>';
-}
-
-function mkpInp(id, val, extra) {
-    return '<input id="' + id + '" value="' + editEsc(val || '') + '" ' + (extra || '') + '>';
-}
-
-function mkpFld(label, inner, full) {
-    return '<div class="edit-field' + (full ? ' full' : '') + '"><label>' + label + '</label>' + inner + '</div>';
-}
-
-function mkpSec(title, body) {
-    return '<div class="edit-section"><h3>' + title + '</h3><div class="edit-grid">' + body + '</div></div>';
-}
-
-async function openPartnershipEditModal(ad) {
-    const full = await mkpFetchFull(ad);
-    window.__editAdId = ad.id;
-    document.getElementById('adEditContent').innerHTML = `
-
-<div class="edit-pro-shell">
-
-<div class="edit-pro-head">
-<div>
-<h2>
-    ویرایش درخواست مشارکت در ساخت
-</h2>
-<p>
-کد:
-<b>
-    ${editEsc(full.part_code || full.code || full.id)}
-</b>
-· 🤝 مشارکت در ساخت
-·
-${editEsc(full.location || [full.city, full.neighborhood].filter(Boolean).join('، ') || '-')}
-${full.completeness ? '· کامل بودن: ' + editEsc(String(full.completeness)) + '٪' : ''}
-${full.created_at ? '· ثبت: ' + editEsc(String(full.created_at)) : ''}
-</p>
-</div>
-</div>
-
-<div class="edit-tabs">
-<button class="edit-tab active" onclick="switchEditPane('editBase',this)">اطلاعات درخواست</button>
-<button class="edit-tab" onclick="switchEditPane('editMkpOwn',this)">ساخت، مالکیت و تماس</button>
-</div>
-
-<div class="edit-pro-body">
-
-<section class="edit-pane active" id="editBase">
-
-${mkpSec('اطلاعات درخواست',
-    mkpFld('عنوان درخواست', mkpInp('editAdTitle', full.title), 1) +
-    mkpFld('وضعیت', '<select id="editAdStatus">' + MKP_STATUS_OPTS.map(o =>
-        '<option value="' + o[0] + '"' + (String(full.status || 'pending') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>') +
-    mkpFld('نوع ملک', mkpSel('mkpEditPropertyType', MKP_OPTS.property_types, full.property_type)) +
-    mkpFld('وضعیت فعلی', mkpSel('mkpEditCurrentStatus', MKP_OPTS.current_statuses, full.current_status)) +
-    mkpFld('مساحت (متر مربع)', mkpInp('mkpEditArea', full.area, 'inputmode="numeric"'))
-)}
-
-${mkpSec('موقعیت',
-    mkpFld('محله', mkpInp('mkpEditNeighborhood', full.neighborhood)) +
-    mkpFld('آدرس کامل', '<textarea id="mkpEditAddress" rows="2">' + editEsc(full.address || '') + '</textarea>', 1) +
-    '<div class="edit-field full"><label>موقعیت روی نقشه — با کلیک یا جابه‌جایی نشانگر تنظیم کنید</label>' +
-    '<input type="hidden" id="mkpEditLat" value="' + editEsc(full.latitude || '') + '">' +
-    '<input type="hidden" id="mkpEditLng" value="' + editEsc(full.longitude || '') + '">' +
-    '<div id="mkpEditMap" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid var(--border);"></div>' +
-    ((full.latitude && full.longitude) ? '<div dir="ltr" style="font-size:11px;color:var(--text-secondary);margin-top:6px">' + editEsc(full.latitude + ', ' + full.longitude) + '</div>' : '') +
-    '</div>'
-)}
-
-${mkpSec('مشخصات زمین / ملک',
-    mkpFld('ملک چند بر دارد؟', mkpSel('mkpEditBrCount', MKP_OPTS.br_counts, full.br_count)) +
-    mkpFld('جهت ملک', mkpSel('mkpEditDirection', MKP_OPTS.directions, full.direction)) +
-    mkpFld('عرض گذر (متر)', mkpInp('mkpEditPassageWidth', full.passage_width, 'inputmode="decimal"')) +
-    mkpFld('عرض زمین (متر)', mkpInp('mkpEditLandWidth', full.land_width, 'inputmode="decimal"'))
-)}
-
-</section>
-
-<section class="edit-pane" id="editMkpOwn">
-
-${mkpSec('وضعیت پروانه و ظرفیت ساخت',
-    mkpFld('وضعیت پروانه ساخت', mkpSel('mkpEditPermitStatus', MKP_OPTS.permit_statuses, full.permit_status)) +
-    mkpFld('تراکم مجاز', mkpInp('mkpEditDensity', full.density)) +
-    mkpFld('سطح اشغال مجاز', mkpInp('mkpEditOccupancyRate', full.occupancy_rate)) +
-    mkpFld('طبقات قابل ساخت', mkpInp('mkpEditBuildableFloors', full.buildable_floors)) +
-    mkpFld('زیربنای قابل ساخت (متر)', mkpInp('mkpEditBuildableArea', full.buildable_area))
-)}
-
-${mkpSec('مالکیت',
-    mkpFld('وضعیت سند', mkpSel('mkpEditDeedStatus', MKP_OPTS.deed_statuses, full.deed_status)) +
-    mkpFld('نوع سند', mkpSel('mkpEditDeedKind', MKP_OPTS.deed_kinds, full.deed_kind)) +
-    mkpFld('تعداد مالکین', mkpInp('mkpEditOwnersCount', full.owners_count)) +
-    mkpFld('وضعیت سکونت', mkpSel('mkpEditOccupancySel', MKP_OPTS.occupancies, full.occupancy)) +
-    mkpFld('وضعیت حقوقی', mkpSel('mkpEditLegalStatus', MKP_OPTS.legal_flags, full.legal_status), 1)
-)}
-
-${mkpSec('اطلاعات تماس مالک',
-    mkpFld('نام مالک', mkpInp('mkpEditOwnerName', full.owner_name)) +
-    mkpFld('شماره تماس', mkpInp('mkpEditPhone', full.phone, 'dir="ltr" inputmode="tel"'))
-)}
-
-${(function () {
-    var docs = mkpDocLink('سند مالکیت', full.doc_deed) +
-        mkpDocLink('پروانه ساخت', full.doc_permit) +
-        mkpDocLink('پایان‌کار', full.doc_endjob) +
-        mkpDocLink('سند / فایل دیگر', full.doc_other);
-    return docs ? mkpSec('مدارک بارگذاری‌شده', docs) : '';
-})()}
-
-${mkpSec('یادداشت مدیر',
-    mkpFld('یادداشت', '<textarea id="mkpEditNotes" rows="3">' + editEsc(full.notes || '') + '</textarea>', 1)
-)}
-
-</section>
-
-</div>
-
-<div class="edit-pro-footer">
-<div>
-<button
-    class="btn-secondary"
-    onclick="closeModal('adEditModal')"
->
-    انصراف
-</button>
-
-<button
-    class="btn-primary-full"
-    style="display:inline-flex;width:auto;padding:0 25px"
-    onclick="saveAdEdit()"
->
-    ذخیره تغییرات
-</button>
-</div>
-</div>
-
-</div>
-`;
-
-    document
-        .getElementById('adEditModal')
-        .classList.add('active');
-    mkpInitEditMap();
-}
-
-function mkpDocLink(label, path) {
-    if (!path) return '';
-    return '<div class="edit-field full"><label>' + label + '</label>' +
-        '<a href="' + editEsc(path) + '" target="_blank" rel="noopener" style="color:var(--primary,#0E7C6E);font-weight:800;font-size:13px">📎 مشاهده فایل</a></div>';
-}
-
-/* نقشهٔ ویرایش مشارکت — همان الگوی نقشهٔ دفتر (mkEnsureLeaflet + نشانگر draggable) */
-function mkpSetEditLatLng(lat, lng) {
-    var a = document.getElementById('mkpEditLat');
-    var b = document.getElementById('mkpEditLng');
-    if (a) a.value = Number(lat).toFixed(6);
-    if (b) b.value = Number(lng).toFixed(6);
-    if (window.__mkpEditMarker) window.__mkpEditMarker.setLatLng([lat, lng]);
-}
-
-function mkpInitEditMap() {
-    mkEnsureLeaflet(function () {
-        var el = document.getElementById('mkpEditMap');
-        if (!el || !window.L) return;
-        var lat = parseFloat((document.getElementById('mkpEditLat') || {}).value);
-        var lng = parseFloat((document.getElementById('mkpEditLng') || {}).value);
-        var has = isFinite(lat) && isFinite(lng) && (lat !== 0 || lng !== 0);
-        if (!has) { lat = MK_DEFAULT_LAT; lng = MK_DEFAULT_LNG; }
-        if (!window.__mkpEditMap) {
-            window.__mkpEditMap = L.map(el).setView([lat, lng], has ? 16 : 14);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; OpenStreetMap'
-            }).addTo(window.__mkpEditMap);
-            window.__mkpEditMarker = L.marker([lat, lng], { draggable: true }).addTo(window.__mkpEditMap);
-            window.__mkpEditMap.on('click', function (e) {
-                mkpSetEditLatLng(e.latlng.lat, e.latlng.lng);
-            });
-            window.__mkpEditMarker.on('dragend', function () {
-                var p = window.__mkpEditMarker.getLatLng();
-                mkpSetEditLatLng(p.lat, p.lng);
-            });
-        } else {
-            window.__mkpEditMap.setView([lat, lng], has ? 16 : 14);
-            window.__mkpEditMarker.setLatLng([lat, lng]);
-        }
-        setTimeout(function () { try { window.__mkpEditMap.invalidateSize(); } catch (e) {} }, 80);
-    });
-}
-
-function mkpCollectEdit(ad) {
-    const g = id => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
-    ad.title = g('editAdTitle');
-    ad.status = g('editAdStatus');
-    ad.property_type = g('mkpEditPropertyType');
-    ad.current_status = g('mkpEditCurrentStatus');
-    ad.area = g('mkpEditArea');
-    ad.neighborhood = g('mkpEditNeighborhood');
-    ad.address = g('mkpEditAddress');
-    ad.br_count = g('mkpEditBrCount');
-    ad.direction = g('mkpEditDirection');
-    ad.passage_width = g('mkpEditPassageWidth');
-    ad.land_width = g('mkpEditLandWidth');
-    ad.permit_status = g('mkpEditPermitStatus');
-    ad.density = g('mkpEditDensity');
-    ad.occupancy_rate = g('mkpEditOccupancyRate');
-    ad.buildable_floors = g('mkpEditBuildableFloors');
-    ad.buildable_area = g('mkpEditBuildableArea');
-    ad.deed_status = g('mkpEditDeedStatus');
-    ad.deed_kind = g('mkpEditDeedKind');
-    ad.owners_count = g('mkpEditOwnersCount');
-    ad.occupancy = g('mkpEditOccupancySel');
-    ad.legal_status = g('mkpEditLegalStatus');
-    ad.owner_name = g('mkpEditOwnerName');
-    ad.phone = g('mkpEditPhone');
-    ad.notes = g('mkpEditNotes');
-    ad.latitude = g('mkpEditLat');
-    ad.longitude = g('mkpEditLng');
-    if (ad.latitude && ad.longitude) ad.location_source = 'map';
-    ad.location = ad.neighborhood;
-    return ad;
-}
-
-async function savePartnershipEdit(ad) {
-    mkpCollectEdit(ad);
-    const ok = await saveAdsToFile([ad]);
-    if (ok) {
-        alert('ذخیره شد');
-        closeModal('adEditModal');
-        renderAds();
-        if (typeof renderDashboard === 'function') renderDashboard();
-    }
-}
-
-async function showPartnershipDetails(ad) {
-    const full = await mkpFetchFull(ad);
-    const kv = items => renderKVGrid(items.filter(([, v]) => v !== '' && v !== null && v !== undefined));
-    const base = kv([
-        ['نوع ملک', full.property_type],
-        ['وضعیت فعلی', full.current_status],
-        ['مساحت', full.area ? normalizeNumberText(full.area) + ' متر مربع' : ''],
-        ['ملک چند بر دارد؟', full.br_count],
-        ['جهت ملک', full.direction],
-        ['عرض گذر', full.passage_width ? normalizeNumberText(full.passage_width) + ' متر' : ''],
-        ['عرض زمین', full.land_width ? normalizeNumberText(full.land_width) + ' متر' : '']
-    ]);
-    const loc = kv([
-        ['محله', full.neighborhood],
-        ['آدرس', full.address],
-        ['مختصات', (full.latitude && full.longitude) ? (full.latitude + ', ' + full.longitude) : '']
-    ]);
-    const mkpHasCoords = !!(full.latitude && full.longitude && isFinite(parseFloat(full.latitude)) && isFinite(parseFloat(full.longitude)));
-    const locMap = mkpHasCoords
-        ? '<div id="mkpDetailMap" style="height:220px;border-radius:12px;overflow:hidden;border:1px solid var(--border);margin-top:10px;"></div>'
-        : '<div class="detail-muted" style="margin-top:10px">موقعیت روی نقشه ثبت نشده است.</div>';
-    const build = kv([
-        ['وضعیت پروانه ساخت', full.permit_status],
-        ['تراکم مجاز', full.density],
-        ['سطح اشغال مجاز', full.occupancy_rate],
-        ['طبقات قابل ساخت', full.buildable_floors],
-        ['زیربنای قابل ساخت', full.buildable_area]
-    ]);
-    const own = kv([
-        ['وضعیت سند', full.deed_status],
-        ['نوع سند', full.deed_kind],
-        ['تعداد مالکین', full.owners_count],
-        ['وضعیت سکونت', full.occupancy],
-        ['وضعیت حقوقی', full.legal_status]
-    ]);
-    const contact = kv([
-        ['نام مالک', full.owner_name],
-        ['شماره تماس', full.phone],
-        ['کد پیگیری', full.part_code || full.code]
-    ]);
-    const meta = kv([
-        ['تاریخ ثبت', full.created_at || '-'],
-        ['درصد کامل بودن', full.completeness ? normalizeNumberText(full.completeness) + '٪' : '']
-    ]);
-    const content = document.getElementById('adDetailContent');
-    content.innerHTML = `
-
-<div class="detail-shell">
-
-<div class="detail-hero">
-<div>
-<div class="detail-title">
-    ${escapeHtml(full.title || 'درخواست مشارکت در ساخت')}
-</div>
-<div class="detail-sub">
-    🤝 مشارکت در ساخت
-    ·
-    ${escapeHtml(full.location || '-')}
-</div>
-</div>
-<span class="ad-status ${getStatusClass(full.status)}">
-    ${getStatusLabel(full.status)}
-</span>
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۱. اطلاعات پایه</div>
-${base || '<div class="detail-muted">ثبت نشده است.</div>'}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۲. موقعیت</div>
-${loc || '<div class="detail-muted">ثبت نشده است.</div>'}
-${locMap}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۳. وضعیت ساخت و ظرفیت</div>
-${build || '<div class="detail-muted">پروانه ندارم — ظرفیت ساخت ثبت نشده.</div>'}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۴. مالکیت</div>
-${own || '<div class="detail-muted">ثبت نشده است.</div>'}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۵. تماس و پیگیری</div>
-${contact}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۶. مدارک بارگذاری‌شده</div>
-${
-    (full.doc_deed || full.doc_permit || full.doc_endjob || full.doc_other)
-        ? ['سند مالکیت|doc_deed', 'پروانه ساخت|doc_permit', 'پایان‌کار|doc_endjob', 'سند / فایل دیگر|doc_other']
-            .map(function (d) {
-                var p = d.split('|');
-                return full[p[1]]
-                    ? '<a href="' + escapeHtml(full[p[1]]) + '" target="_blank" rel="noopener" class="detail-tag" style="color:var(--primary,#0E7C6E);text-decoration:none">📎 ' + p[0] + '</a>'
-                    : '';
-            }).join(' ')
-        : '<div class="detail-muted">مدارکی بارگذاری نشده است.</div>'
-}
-</div>
-
-<div class="detail-section">
-<div class="detail-section-title">۷. متادیتا</div>
-${meta}
-</div>
-
-</div>`;
-
-    document
-        .getElementById('adDetailModal')
-        .classList.add('active');
-
-    /* نقشهٔ فقط-نمایشی — همان الگوی mkEnsureLeaflet */
-    if (mkpHasCoords) {
-        mkEnsureLeaflet(function () {
-            var el = document.getElementById('mkpDetailMap');
-            if (!el || !window.L) return;
-            var lat = parseFloat(full.latitude);
-            var lng = parseFloat(full.longitude);
-            var m = L.map(el).setView([lat, lng], 16);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; OpenStreetMap'
-            }).addTo(m);
-            L.marker([lat, lng]).addTo(m);
-            setTimeout(function () { try { m.invalidateSize(); } catch (e) {} }, 80);
-        });
-    }
 }
 
 

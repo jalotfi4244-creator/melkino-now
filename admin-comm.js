@@ -538,12 +538,13 @@
             '<input class="cm-field" id="cpName" placeholder="نام" style="margin-bottom:6px">' +
             '<select class="cm-field" id="cpSeg" style="margin-bottom:6px"><option value="">همه فعال‌ها</option>' + opt + '</select>' +
             '<textarea class="cm-field" id="cpBody" placeholder="متن"></textarea>' +
+            '<input class="cm-field" id="cpSchedule" type="datetime-local" style="margin:6px 0" title="زمان ارسال — خالی = پیش‌نویس دستی">' +
             '<details class="cm-adv"><summary>ساخت با توضیح (پیشنهاد متن)</summary><input class="cm-field" id="aiCamp" placeholder="برای خریدارهای فعال یک پیام دوستانه"><button class="cm-btn dim" id="aiCampGo" style="margin-top:6px">پیشنهاد متن</button></details>' +
             '<button class="cm-btn" id="cpSave" style="margin:8px 0">ذخیره پیش‌نویس</button>' +
             (rows ? '<table class="cm-table"><thead><tr><th>نام</th><th>وضعیت</th><th>نتیجه</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="cm-empty">کمپینی نیست.</div>') +
             '<details class="cm-adv"><summary>سگمنت ذخیره‌شده</summary><div id="segBox"></div></details></div></div>';
         document.getElementById('cpSave').onclick = async function () {
-            await api('campaigns', { body: { name: document.getElementById('cpName').value, body: document.getElementById('cpBody').value, segment_id: Number(document.getElementById('cpSeg').value || 0) } });
+            await api('campaigns', { body: { name: document.getElementById('cpName').value, body: document.getElementById('cpBody').value, segment_id: Number(document.getElementById('cpSeg').value || 0), scheduled_at: document.getElementById('cpSchedule') ? document.getElementById('cpSchedule').value : '' } });
             showCamp();
         };
         document.getElementById('aiCampGo').onclick = async function () {

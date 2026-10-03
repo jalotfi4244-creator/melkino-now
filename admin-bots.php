@@ -29,7 +29,7 @@ if ($melkinoBotAction !== '') {
         case 'get':
             $settings = melkinoBotSettings();
             // توکن‌ها و کلیدها فقط به‌صورت ماسک نمایش داده می‌شوند
-            foreach (['telegram_token', 'bale_token', 'eitaa_token', 'sms_api_key'] as $k) {
+            foreach (['telegram_token', 'bale_token', 'eitaa_token', 'sms_api_key', 'sms_password'] as $k) {
                 if (!empty($settings[$k])) {
                     $settings[$k . '_masked'] = substr($settings[$k], 0, 6) . '••••••' . substr($settings[$k], -4);
                 } else {
@@ -643,17 +643,44 @@ if ($melkinoBotAction !== '') {
             اگر پنل پیامک غیرفعال باشد یا تنظیم نشده باشد، کد ورود به‌جای پیامک، مستقیم روی صفحه نمایش داده می‌شود.
         </div>
 
+        <label class="admin-field-label">سرویس‌دهنده</label>
+        <select id="smsProvider" class="admin-input" style="max-width:260px;">
+            <option value="melipayamak">ملی‌پیامک (rest.payamak-panel.com)</option>
+            <option value="generic">سرویس عمومی دیگر (api_key + api_url)</option>
+        </select>
+        <div class="admin-field-help">اتصال برنامهٔ پیامک ملکینو برای ملی‌پیامک تنظیم شده است.</div>
+
         <label class="admin-field-label">نشانی API سرویس پیامک</label>
-        <input type="text" id="smsApiUrl" class="admin-input" dir="ltr" placeholder="https://..." autocomplete="off">
-        <div class="admin-field-help">نشانی وب‌سرویس ارسال پیامک.</div>
+        <input type="text" id="smsApiUrl" class="admin-input" dir="ltr" placeholder="https://rest.payamak-panel.com/api/SendSMS/SendSMS" autocomplete="off">
+        <div class="admin-field-help">برای ملی‌پیامک خالی بگذار (آدرس رسمی خودکار استفاده می‌شود).</div>
 
-        <label class="admin-field-label">کلید API</label>
+        <label class="admin-field-label">نام کاربری سامانه پیامک</label>
         <input type="text" id="smsApiKey" class="admin-input" dir="ltr" placeholder="..." autocomplete="off">
-        <div class="admin-field-help">خالی بگذار تا مقدار قبلی حفظ شود؛ برای پاک‌کردن «-» وارد کن.</div>
+        <div class="admin-field-help">نام کاربری پنل ملی‌پیامک. خالی = حفظ مقدار قبلی؛ پاک‌کردن: «-».</div>
 
-        <label class="admin-field-label">شماره خط ارسال‌کننده</label>
-        <input type="text" id="smsSenderLine" class="admin-input" dir="ltr" placeholder="3000...">
-        <div class="admin-field-help">شماره خطی که پیامک از طرف آن ارسال می‌شود.</div>
+        <label class="admin-field-label">رمز عبور سامانه پیامک</label>
+        <input type="password" id="smsApiPassword" class="admin-input" dir="ltr" placeholder="..." autocomplete="new-password">
+        <div class="admin-field-help">رمز پنل ملی‌پیامک. خالی = حفظ مقدار قبلی؛ پاک‌کردن: «-».</div>
+
+        <label class="admin-field-label">خط خدماتی (OTP و اطلاع‌رسانی)</label>
+        <input type="text" id="smsSenderLine" class="admin-input" dir="ltr" placeholder="مثلاً 5000...">
+        <div class="admin-field-help">خط اصلی ارسال: کد ورود، جستجوی ذخیره‌شده، انطباق درخواست‌ها و هشدارها.</div>
+
+        <label class="admin-field-label">خط OTP (اختیاری)</label>
+        <input type="text" id="smsOtpLine" class="admin-input" dir="ltr" placeholder="خالی = همان خط خدماتی">
+        <div class="admin-field-help">اگر برای کد ورود خط جداگانه داری؛ در غیر این صورت خالی بگذار.</div>
+
+        <label class="admin-field-label">کد الگوی OTP — bodyId (اختیاری)</label>
+        <input type="text" id="smsOtpBodyId" class="admin-input" dir="ltr" placeholder="مثلاً 100024...">
+        <div class="admin-field-help">اگر در ملی‌پیامک پترن «کد تایید» ساختی، کدش را بگذار تا ارسال با الگوی تأییدشده انجام شود. در این حالت متن از سامانه می‌آید و قالب زیر استفاده نمی‌شود.</div>
+
+        <label class="admin-field-label">متن پیامک کد ورود</label>
+        <textarea id="smsOtpTemplate" class="admin-input" rows="2" placeholder="کد ورود ملکینو: {code} (اعتبار ۲ دقیقه)"></textarea>
+        <div class="admin-field-help">متغیر {code} جای کد می‌نشیند. خالی = متن پیش‌فرض.</div>
+
+        <label class="admin-field-label">خط تبلیغاتی (کمپین‌ها)</label>
+        <input type="text" id="smsPromoLine" class="admin-input" dir="ltr" placeholder="مثلاً 3000...">
+        <div class="admin-field-help">طبق مقررات، کمپین‌های تبلیغاتی فقط از خط تبلیغاتی و فقط ۸ صبح تا ۲۲ شب ارسال می‌شوند.</div>
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;">
             <input type="text" id="smsTestPhone" class="admin-input" dir="ltr" placeholder="09123456789" style="max-width:170px;">

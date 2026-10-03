@@ -364,8 +364,17 @@ if ($action === 'campaigns') {
             melkinoAdminJson(['success' => false, 'message' => 'نام و متن کمپین لازم است.'], 400);
         }
         $seg = (int)($body['segment_id'] ?? 0) ?: null;
-        $pdo->prepare('INSERT INTO comm_campaigns(name,body,segment_id,status) VALUES (?,?,?,\'draft\')')->execute([$name, $text, $seg]);
-        commAudit($pdo, 'campaign_create', $name);
+        // زمان‌بندی ارسال (اختیاری) — اجرا توسط برنامهٔ پیامک (sms-program.php)
+        $sched = trim((string)($body['scheduled_at'] ?? ''));
+        $sched = preg_match('/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/', $sched)
+            ? str_replace('T', ' ', substr($sched, 0, 16))
+            : null;
+        if ($sched !== null) {
+            $pdo->prepare('INSERT INTO comm_campaigns(name,body,segment_id,status,scheduled_at) VALUES (?,?,?,\'scheduled\',?)')->execute([$name, $text, $seg, $sched]);
+        } else {
+            $pdo->prepare('INSERT INTO comm_campaigns(name,body,segment_id,status) VALUES (?,?,?,\'draft\')')->execute([$name, $text, $seg]);
+        }
+        commAudit($pdo, 'campaign_create', $name . ($sched !== null ? ' @' . $sched : ''));
         melkinoAdminJson(['success' => true, 'id' => (int)$pdo->lastInsertId()]);
     }
     melkinoAdminJson(['success' => true, 'rows' => commTry($pdo, 'SELECT * FROM comm_campaigns ORDER BY id DESC LIMIT 80')]);
