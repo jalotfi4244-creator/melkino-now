@@ -55,6 +55,13 @@
             set('botProxy', s.http_proxy);
             set('smsApiUrl', s.sms_api_url);
             set('smsSenderLine', s.sms_sender_line);
+            set('smsProvider', s.sms_provider || 'melipayamak');
+            set('smsOtpLine', s.sms_otp_line);
+            set('smsPromoLine', s.sms_promo_line);
+            set('smsOtpBodyId', s.sms_otp_body_id);
+            set('smsOtpTemplate', s.sms_otp_template_masked);
+            const sp = document.getElementById('smsApiPassword');
+            if (sp) sp.placeholder = s.sms_password_masked || 'تنظیم نشده';
             const tg = document.getElementById('botTelegramToken');
             const ba = document.getElementById('botBaleToken');
             const ei = document.getElementById('botEitaaToken');
@@ -109,6 +116,12 @@
                 sms_api_key: val('smsApiKey'),
                 sms_api_url: val('smsApiUrl'),
                 sms_sender_line: val('smsSenderLine'),
+                sms_provider: val('smsProvider') || 'melipayamak',
+                sms_password: val('smsApiPassword'),
+                sms_otp_line: val('smsOtpLine'),
+                sms_promo_line: val('smsPromoLine'),
+                sms_otp_body_id: val('smsOtpBodyId'),
+                sms_otp_template: val('smsOtpTemplate'),
                 login_telegram_enabled: loginTg ? 1 : 0,
                 login_bale_enabled: loginBale ? 1 : 0,
                 login_eitaa_enabled: loginEitaa ? 1 : 0,

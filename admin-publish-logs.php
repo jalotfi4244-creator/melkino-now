@@ -60,6 +60,22 @@ if ($adId === '' || strlen($adId) > 40) {
     melkinoAdminJson(['success' => false, 'message' => 'شناسهٔ آگهی معتبر نیست.'], 422);
 }
 
+// جدول تاریخچهٔ مدیریتی (ویرایش/تأیید/تعلیق/VIP/...) — در صورت نبود خودکار ساخته می‌شود
+try {
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS ads_history (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            ad_id VARCHAR(64) NOT NULL,
+            action VARCHAR(60) NOT NULL,
+            detail VARCHAR(500) NULL,
+            actor VARCHAR(120) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ah_ad (ad_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+    );
+} catch (Throwable $e) {
+}
+
 try {
     $st = $pdo->prepare(
         'SELECT id, platform, success, message_id, note, created_at
@@ -69,7 +85,21 @@ try {
          LIMIT 100'
     );
     $st->execute([$adId]);
-    melkinoAdminJson(['success' => true, 'logs' => $st->fetchAll(PDO::FETCH_ASSOC)]);
+    $logs = $st->fetchAll(PDO::FETCH_ASSOC);
+    $history = [];
+    try {
+        $h = $pdo->prepare(
+            'SELECT id, action, detail, actor, created_at
+             FROM ads_history
+             WHERE ad_id = ?
+             ORDER BY id DESC
+             LIMIT 150'
+        );
+        $h->execute([$adId]);
+        $history = $h->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e2) {
+    }
+    melkinoAdminJson(['success' => true, 'logs' => $logs, 'history' => $history]);
 } catch (Throwable $e) {
     melkinoAdminJson(['success' => false, 'message' => melkinoSafeError($e, 'publish-logs.op', 'عملیات انجام نشد.')], 500);
 }

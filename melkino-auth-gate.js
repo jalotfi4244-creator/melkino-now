@@ -95,12 +95,27 @@
         }).then(function (r) { return r.text().then(function (t) { return { r: r, t: t }; }); })
         .then(function (x) {
             var j = {};
-            try { j = JSON.parse(x.t); } catch (e) { j = {}; }
+            var looksHtml = /^\s*<|^\s*\{|your connection|suspended|challenge/i.test(x.t || '');
+            if (!looksHtml) { try { j = JSON.parse(x.t); } catch (e) { j = {}; } }
             if (!j || !j.success) {
                 inflight = false;
-                setText('ورود انجام نشد', (j && j.message) ? j.message : 'در حال تلاش دوباره');
+                var srv = (j && j.message) ? String(j.message) : '';
+                /* پاسخ HTML/چالش هاست یا خطای شبکه‌ای → یک‌بار رفرش کامل:
+                   چالش امنیتی هاست‌ها فقط با ناوبری کامل تکمیل می‌شود
+                   (همان کاری که «بستن و باز کردن مینی‌اپ» می‌کرد). */
+                var suspect = looksHtml || !srv || x.r.status === 403 || x.r.status === 503 || x.r.status === 502;
+                var n = 0;
+                try { n = parseInt(sessionStorage.getItem('melkino_auth_reload') || '0', 10) || 0; } catch (eN) {}
+                if (suspect && n < 1) {
+                    try { sessionStorage.setItem('melkino_auth_reload', String(n + 1)); } catch (eS) {}
+                    setText('یک لحظه…', 'در حال تازه‌سازی امن اتصال');
+                    setTimeout(function () { w.location.reload(); }, 600);
+                    return;
+                }
+                setText('ورود انجام نشد', srv || ('پاسخ سرور: ' + x.r.status));
                 return;
             }
+            try { sessionStorage.removeItem('melkino_auth_reload'); } catch (eC) {}
             try { sessionStorage.setItem('melkino_profile_synced', 'ok'); } catch (e) {}
             try { sessionStorage.setItem('melkino_identified_ok', '1'); } catch (e) {}
             if (w.MELKINO_PROFILE) {

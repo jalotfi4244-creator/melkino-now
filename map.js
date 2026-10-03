@@ -28,9 +28,24 @@
         return '';
     }
 
+    var TYPE_COLORS = (cfg.marker_colors || {});
+    var VIP_COLOR = MK.vipColor || '#D4AF37';
+
+    function pinColor(it) {
+        if (it.is_vip) return VIP_COLOR;
+        var c = TYPE_COLORS[String(it.type || '').trim()];
+        if (!c) {
+            // تطابق نرم: «ویلایی/ویلا» و کلیدهای مشابه
+            var keys = Object.keys(TYPE_COLORS);
+            for (var i = 0; i < keys.length; i++) {
+                if (keys[i] && String(it.type || '').indexOf(keys[i]) !== -1) { c = TYPE_COLORS[keys[i]]; break; }
+            }
+        }
+        return c || MK.color || it.color || THEME_COLORS.primary || '#0e7c6e';
+    }
+
     function pinIcon(it) {
-        var color = MK.color || it.color || THEME_COLORS.primary || '#0e7c6e';
-        if (it.is_vip && MK.vipColor) color = MK.vipColor;
+        var color = pinColor(it);
 
         // اگر هِلپر مشترک لود نشده بود، همان پین قدیمی نمایش داده می‌شود
         if (!window.MelkinoMarker) {
@@ -93,28 +108,45 @@
                 amenIcon(!!it.has_storage, 'انباری', '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16v13H4z"/><path d="M4 7 12 3l8 4"/><path d="M12 7v13"/></svg>') +
                 '</div>';
         }
+        var areaTxt = it.area ? (String(it.area).replace(/\D/g, '') || it.area) : '';
+        var areaLine = areaTxt ? esc(areaTxt) + ' متراژ' : '';
+        var roomLine = it.rooms ? (esc(String(it.rooms)) + ' اتاق') : '';
+        var line3 = [areaLine, roomLine].filter(Boolean).join(' · ');
         return '<button type="button" class="mk-map-sheet-close" id="mkMapSheetClose">بستن</button>' +
             '<div class="mk-map-sheet-body">' +
             (it.thumbnail ? '<img class="mk-map-thumb" src="' + it.thumbnail + '" alt="">' : '') +
-            '<div class="mk-map-sheet-copy"><strong>' + (it.title || '') + '</strong>' +
-            '<p class="mk-map-kind">' + (it.transaction_type || '—') + (it.type ? ' · ' + it.type : '') +
-            (it.rooms ? ' · ' + it.rooms + ' خواب' : '') + '</p>' +
+            '<div class="mk-map-sheet-copy">' +
+            '<span class="mk-sheet-tx">' + esc(it.transaction_type || '—') + (it.is_vip ? ' ⭐' : '') + '</span>' +
+            '<strong class="mk-sheet-title">' + esc(it.title || '') + '</strong>' +
+            '<p class="mk-sheet-meta">' + line3 + '</p>' +
             icons +
-            '<p class="mk-map-price">' + (it.price ? it.price + ' تومان' : '') + '</p>' +
+            '<p class="mk-sheet-price">' + (it.price ? esc(it.price) + ' <small>تومان</small>' : '') + '</p>' +
             '<a class="mk-map-btn gold" href="property-details.php?id=' + encodeURIComponent(it.id) + '">' +
             esc(MCARD.buttonText || 'مشاهده فایل') + '</a></div></div>';
     }
 
+    var openItemId = null;
+    function closeSheet() {
+        var sh = document.getElementById('mkMapSheet');
+        if (sh) sh.hidden = true;
+        openItemId = null;
+    }
     function openItem(id) {
         var it = itemsById[id];
         if (!it) return;
         var sh = document.getElementById('mkMapSheet');
+        // کلیک دوباره روی همان مارکر → بستن کارت
+        if (openItemId === id && sh && !sh.hidden) {
+            closeSheet();
+            return;
+        }
+        openItemId = id;
         sh.setAttribute('data-pos', MCARD.pos || 'bottom');
         sh.setAttribute('data-skin', MCARD.skin || 'classic');
         sh.hidden = false;
         sh.innerHTML = sheetHtml(it);
         var closer = document.getElementById('mkMapSheetClose');
-        if (closer) closer.onclick = function () { sh.hidden = true; };
+        if (closer) closer.onclick = closeSheet;
         var m = markersById[id];
         if (m && m.getLatLng) map.panTo(m.getLatLng());
     }
@@ -146,6 +178,8 @@
             })
             .catch(function () {});
     }
+
+    map.on('click', function () { closeSheet(); });
 
     var t = null;
     map.on('moveend', function () {

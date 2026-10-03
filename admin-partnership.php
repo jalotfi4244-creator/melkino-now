@@ -80,6 +80,76 @@ if ($mkAction !== '') {
             $st->execute([$status, $id]);
             melkinoAdminJson(['success' => true]);
 
+        case 'site_publish':
+            // انتشار «مشارکت در ساخت» در سایت: آینهٔ آگهی در جدول ads ساخته/به‌روز می‌شود
+            // on=1 → انتشار (UPSERT آینه با status=published) | on=0 → قطع (status=archived)
+            // بدون body → فقط بررسی وضعیت فعلی
+            $data = function_exists('melkinoAdminJsonBody') ? melkinoAdminJsonBody() : $_POST;
+            $pid = (int)($data['id'] ?? 0);
+            if ($pid <= 0) {
+                melkinoAdminJson(['success' => false, 'message' => 'شناسه نامعتبر است.'], 422);
+            }
+            $st = $pdo->prepare('SELECT * FROM partnership_requests WHERE id = ? LIMIT 1');
+            $st->execute([$pid]);
+            $pr = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$pr) {
+                melkinoAdminJson(['success' => false, 'message' => 'درخواست یافت نشد.'], 404);
+            }
+            $mirrorId = 'PRT-' . $pid;
+            $chk = $pdo->prepare("SELECT status FROM ads WHERE id = ? LIMIT 1");
+            $chk->execute([$mirrorId]);
+            $mirrorStatus = (string)($chk->fetchColumn() ?: '');
+
+            if (!array_key_exists('on', $data)) {
+                melkinoAdminJson(['success' => true, 'published' => $mirrorStatus === 'published']);
+            }
+
+            $on = !empty($data['on']);
+            if ($on) {
+                $loc = trim(($pr['city'] ?? '') . (($pr['neighborhood'] ?? '') !== '' ? '، ' . $pr['neighborhood'] : ''));
+                $descParts = [];
+                if (!empty($pr['current_status'])) $descParts[] = 'وضعیت فعلی: ' . $pr['current_status'];
+                if (!empty($pr['br_count'])) $descParts[] = 'بر: ' . $pr['br_count'];
+                if (!empty($pr['direction'])) $descParts[] = 'جهت: ' . $pr['direction'] ?? '';
+                if (!empty($pr['buildable_floors'])) $descParts[] = 'تراکم قابل ساخت: ' . $pr['buildable_floors'] . ' طبقه';
+                if (!empty($pr['buildable_units'])) $descParts[] = 'تعداد واحد قابل ساخت: ' . $pr['buildable_units'];
+                if (!empty($pr['owner_share'])) $descParts[] = 'سهم مالک: ' . $pr['owner_share'];
+                if (!empty($pr['duration'])) $descParts[] = 'مدت: ' . $pr['duration'];
+                $desc = 'مشارکت در ساخت — ' . implode(' · ', array_filter($descParts));
+                if (!empty($pr['notes'])) $desc .= "\n" . mb_substr((string)$pr['notes'], 0, 800);
+                $fields = [
+                    ':id' => $mirrorId,
+                    ':title' => mb_substr((string)($pr['title'] ?? 'مشارکت در ساخت'), 0, 180),
+                    ':pt' => (string)($pr['property_type'] ?? ''),
+                    ':area' => (string)($pr['area'] ?? ''),
+                    ':loc' => mb_substr($loc !== '' ? $loc : 'مشارکت در ساخت', 0, 250),
+                    ':addr' => mb_substr((string)($pr['address'] ?? ''), 0, 500),
+                    ':phone' => (string)($pr['phone'] ?? ''),
+                    ':owner' => mb_substr((string)($pr['owner_name'] ?? ''), 0, 120),
+                    ':desc' => $desc,
+                    ':lat' => ($pr['latitude'] ?? null) !== null && $pr['latitude'] !== '' ? (float)$pr['latitude'] : null,
+                    ':lng' => ($pr['longitude'] ?? null) !== null && $pr['longitude'] !== '' ? (float)$pr['longitude'] : null,
+                ];
+                $exists = $mirrorStatus !== '';
+                if ($exists) {
+                    $pdo->prepare("UPDATE ads SET title=:title, property_type=:pt, area=:area, location=:loc, address=:addr, phone=:phone, last_name=:owner, description=:desc, latitude=:lat, longitude=:lng, status='published', updated_at=NOW() WHERE id=:id")
+                        ->execute($fields);
+                } else {
+                    $pdo->prepare("INSERT INTO ads (id, title, status, transaction_type, property_type, area, location, address, phone, last_name, description, latitude, longitude, created_at, updated_at)
+                                   VALUES (:id, :title, 'published', 'مشارکت در ساخت', :pt, :area, :loc, :addr, :phone, :owner, :desc, :lat, :lng, NOW(), NOW())")
+                        ->execute($fields);
+                }
+                if (function_exists('melkinoLogAdHistory')) {
+                    melkinoLogAdHistory($pdo, $mirrorId, 'انتشار مشارکت در سایت', 'درخواست مشارکت #' . $pid);
+                }
+                melkinoAdminJson(['success' => true, 'published' => true, 'ad_id' => $mirrorId, 'message' => 'مشارکت در سایت منتشر شد.']);
+            }
+            $pdo->prepare("UPDATE ads SET status='archived', updated_at=NOW() WHERE id = ?")->execute([$mirrorId]);
+            if (function_exists('melkinoLogAdHistory')) {
+                melkinoLogAdHistory($pdo, $mirrorId, 'قطع انتشار مشارکت', 'درخواست مشارکت #' . $pid);
+            }
+            melkinoAdminJson(['success' => true, 'published' => false, 'message' => 'انتشار مشارکت از سایت قطع شد.']);
+
         case 'note':
             $data = function_exists('melkinoAdminJsonBody') ? melkinoAdminJsonBody() : $_POST;
             $id = (int)($data['id'] ?? 0);

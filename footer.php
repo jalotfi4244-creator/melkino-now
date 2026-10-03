@@ -224,5 +224,19 @@ if (is_file(__DIR__ . '/ad-cards-bootstrap.php')) {
     }
     ?>
 
+    <?php
+    // قلاب ترافیکی «برنامهٔ پیامک»: حداکثر هر ۵ دقیقه، در پایان پاسخ اجرا
+    // می‌شود (register_shutdown_function) و هرگز رندر صفحه را به تأخیر
+    // نمی‌اندازد. داخل تابع، گیت mtime هم هست؛ اینجا فقط فراخوانی سبک است.
+    if (is_file(__DIR__ . '/sms-program.php')) {
+        require_once __DIR__ . '/sms-program.php';
+        try {
+            smsProgramTrafficTick();
+        } catch (Throwable $e) {
+            // هرگز صفحه را نمی‌شکند
+        }
+    }
+    ?>
+
 </body>
 </html>

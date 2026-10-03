@@ -184,6 +184,53 @@ $adsLoadError = '';
 /* =========================================================
    ذخیره تغییرات آگهی‌ها در MySQL
    ========================================================= */
+if (!function_exists('melkinoEnsureAdsHistory')) {
+    /** جدول تاریخچهٔ کامل آگهی (ویرایش/تأیید/تعلیق/انتشار کانال...) */
+    function melkinoEnsureAdsHistory(PDO $pdo): void
+    {
+        static $done = false;
+        if ($done) return;
+        // اگر تراکنش فعالی است، CREATE (DDL) آن را implicit-commit می‌کند؛
+        // در این حالت فقط ساخت جدول را به فرصت بی‌تراکنش موکول می‌کنیم.
+        try {
+            if ($pdo->inTransaction()) {
+                return;
+            }
+        } catch (Throwable $eTx) {
+        }
+        try {
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS ads_history (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    ad_id VARCHAR(64) NOT NULL,
+                    action VARCHAR(60) NOT NULL,
+                    detail VARCHAR(500) NULL,
+                    actor VARCHAR(120) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    KEY idx_ah_ad (ad_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            $done = true;
+        } catch (Throwable $e) {
+        }
+    }
+}
+
+if (!function_exists('melkinoLogAdHistory')) {
+    function melkinoLogAdHistory(PDO $pdo, string $adId, string $action, string $detail = ''): void
+    {
+        try {
+            melkinoEnsureAdsHistory($pdo);
+            $actor = 'ادمین';
+            if (!empty($_SESSION['admin_username'])) $actor = (string)$_SESSION['admin_username'];
+            elseif (!empty($_SESSION['admin_id'])) $actor = 'ادمین #' . (int)$_SESSION['admin_id'];
+            $st = $pdo->prepare('INSERT INTO ads_history (ad_id, action, detail, actor) VALUES (?,?,?,?)');
+            $st->execute([$adId, $action, mb_substr($detail, 0, 480), $actor]);
+        } catch (Throwable $e) {
+        }
+    }
+}
+
 function dbCleanNumber($value): ?float {
     if ($value === null || $value === '') return null;
     $v = str_replace([',', '٬', ' ', 'تومان', 'ریال'], '', (string)$value);
@@ -253,12 +300,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
             $stOld->execute($syncIds);
             foreach ($stOld->fetchAll(PDO::FETCH_ASSOC) as $sr) $syncOld[(string)$sr['id']] = $sr;
         }
-        $pdo->beginTransaction();
+        // مهم: هیچ DDL (CREATE/ALTER) داخل تراکنش اجرا نشود — DDL در MySQL
+        // تراکنش را «implicit commit» می‌کند و commit پایانی با خطای
+        // «There is no active transaction» می‌شکند. همهٔ تضمین‌های اسکیما
+        // باید «قبل» از beginTransaction انجام شوند.
         melkinoEnsureAdsDefaultImageColumn($pdo);
         if (function_exists('melkinoEnsureRatingColumns')) {
             melkinoEnsureRatingColumns($pdo);
         }
-        $update = $pdo->prepare("UPDATE ads SET title=?, transaction_type=?, property_type=?, status=?, location=?, address=?, gender=?, last_name=?, phone=?, price_sell=?, price_condition=?, deposit=?, rent_monthly=?, full_rent=?, full_rent_enabled=?, total_price=?, down_payment=?, payment_terms=?, price_hidden=?, description=?, publish_photos=?, is_vip=?, tags=?, property_details=?, custom_fields=?, is_not_keyed=?, delivery_date=?, vacancy_date=?, is_vacant=?, exchange_interested=?, exchange_with=?, deed_type=?, deed_notes=?, exchange_types=?, visit_hours=?, is_old=?, is_renovated=?, water_share=?, well_name=?, has_loan=?, loan_amount=?, loan_type=?, loan_duration=?, loan_bank=?, loan_installment=?, loan_installments_paid=?, loan_notes=?, default_image_no=?, melkino_visited=?, melkino_rating=?, melkino_review=?, updated_at=NOW(), published_at=CASE WHEN ?='published' THEN COALESCE(published_at,NOW()) ELSE NULL END, sold_at=CASE WHEN ?='sold' THEN COALESCE(sold_at,NOW()) ELSE NULL END WHERE id=?");
+        if (function_exists('melkinoEnsureAdsHistory')) {
+            melkinoEnsureAdsHistory($pdo);
+        }
+        $pdo->beginTransaction();
+        // [PRICE] راند ۲۱: display_price هم مثل ثبت اولیه همگام با ستون‌های قیمت
+        // نگه داشته می‌شود (اولویت: price_sell → total_price → deposit →
+        // rent_monthly). بدون این، پس از اصلاح قیمت در پنل، نمایش عمومی (هوم)
+        // همچنان مقدار قدیمی/آلودهٔ display_price را نشان می‌داد.
+        $update = $pdo->prepare("UPDATE ads SET title=?, transaction_type=?, property_type=?, status=?, location=?, address=?, gender=?, last_name=?, phone=?, price_sell=?, price_condition=?, deposit=?, rent_monthly=?, full_rent=?, full_rent_enabled=?, total_price=?, display_price=?, down_payment=?, payment_terms=?, price_hidden=?, description=?, publish_photos=?, is_vip=?, tags=?, property_details=?, custom_fields=?, is_not_keyed=?, delivery_date=?, vacancy_date=?, is_vacant=?, exchange_interested=?, exchange_with=?, deed_type=?, deed_notes=?, exchange_types=?, visit_hours=?, is_old=?, is_renovated=?, water_share=?, well_name=?, has_loan=?, loan_amount=?, loan_type=?, loan_duration=?, loan_bank=?, loan_installment=?, loan_installments_paid=?, loan_notes=?, default_image_no=?, melkino_visited=?, melkino_rating=?, melkino_review=?, updated_at=NOW(), published_at=CASE WHEN ?='published' THEN COALESCE(published_at,NOW()) ELSE NULL END, sold_at=CASE WHEN ?='sold' THEN COALESCE(sold_at,NOW()) ELSE NULL END WHERE id=?");
         $delAmen = $pdo->prepare("DELETE FROM ad_amenities WHERE ad_id=?");
         $findAmen = $pdo->prepare("SELECT id FROM amenities WHERE name=? LIMIT 1");
         $insAmen = $pdo->prepare("INSERT INTO amenities (name, is_active) VALUES (?,1)");
@@ -275,6 +333,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
             // برسد، دیگر دور ریخته نمی‌شود — لایه‌ها باز و به آرایه تبدیل می‌شود.
             $details = melkinoNormalizeJsonColumn($ad['property_details'] ?? null);
             $amenities = is_array($ad['amenities'] ?? null) ? $ad['amenities'] : [];
+            // [PRICE] اولویت مثل فرم ثبت (register-*): price_sell → total_price → deposit → rent_monthly
+            $mkDisplayPrice = dbCleanNumber($ad['price_sell'] ?? null)
+                ?: dbCleanNumber($ad['total_price'] ?? null)
+                ?: dbCleanNumber($ad['deposit'] ?? null)
+                ?: dbCleanNumber($ad['rent_monthly'] ?? null);
             $update->execute([
                 trim((string)($ad['title'] ?? '')),
                 $ad['transaction_type'] ?? null,
@@ -292,6 +355,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
                 dbCleanNumber($ad['full_rent'] ?? null),
                 !empty($ad['full_rent_enabled']) ? 1 : 0,
                 dbCleanNumber($ad['total_price'] ?? null),
+                $mkDisplayPrice,
                 dbCleanNumber($ad['down_payment'] ?? null),
                 $ad['payment_terms'] ?? null,
                 !empty($ad['price_hidden']) ? 1 : 0,
@@ -333,6 +397,26 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
                 $status,
                 $id
             ]);
+
+            // تاریخچهٔ آگهی: هر ذخیرهٔ ادمین + تغییر وضعیت (تأیید/تعلیق/رد/فروش/بایگانی)
+            try {
+                melkinoLogAdHistory($pdo, (string)$id, 'ویرایش توسط ادمین', 'ذخیرهٔ کامل از پنل آگهی‌ها');
+                $__oldSt = isset($syncOld[(string)$id]['status']) ? (string)$syncOld[(string)$id]['status'] : '';
+                if ($__oldSt !== '' && $__oldSt !== $status) {
+                    $__stMap = [
+                        'published' => 'تأیید و انتشار',
+                        'pending'   => 'تعلیق (بازگشت به صف تأیید)',
+                        'rejected'  => 'رد آگهی',
+                        'sold'      => 'علامت‌گذاری فروش',
+                        'archived'  => 'بایگانی آگهی',
+                    ];
+                    melkinoLogAdHistory($pdo, (string)$id, $__stMap[$status] ?? ('تغییر وضعیت به ' . $status), 'وضعیت قبلی: ' . $__oldSt);
+                }
+                if ((int)($syncOld[(string)$id]['is_vip'] ?? 0) !== (int)!empty($ad['is_vip'])) {
+                    melkinoLogAdHistory($pdo, (string)$id, !empty($ad['is_vip']) ? 'VIP شد' : 'VIP برداشته شد', '');
+                }
+            } catch (Throwable $e) {
+            }
 
             try {
                 $lat = isset($ad['latitude']) ? $ad['latitude'] : null;
@@ -389,7 +473,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
                 $sortOrder++;
             }
         }
-        $pdo->commit();
+        if ($pdo->inTransaction()) {
+            $pdo->commit();
+        } else {
+            error_log('[melkino][bulk_sync] transaction was implicitly closed before commit (DDL inside transaction?)');
+        }
         // راند ۵۱: اعلان تغییر وضعیت آگهی به مالک (منتشر/رد/فروخته/معلق) — بی‌صدا
         try {
             if (!function_exists('melkinoNotifyAdOwner')) {
@@ -443,8 +531,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (string)($_GET['ad_db_actio
         error_log('Melkino admin-panel bulk_sync error: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
         adminPanelJsonResponse([
             'success' => false,
-            // جزئیات فنی فقط در لاگ سرور می‌ماند (بالاتر error_log شده است)
             'message' => melkinoSafeError($e, 'admin-panel.bulk_sync', 'ذخیره تغییرات انجام نشد.'),
+            // ادمین باید علت واقعی را ببیند (مثلاً «Unknown column») تا قابل‌رفع باشد
+            'error' => $e->getMessage() . ' @ line ' . $e->getLine(),
         ], 500);
     }
     exit;
@@ -1802,6 +1891,12 @@ if (
         name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     >
+
+    <!-- راند ۲۱: اعلام صریح پشتیبانی تم روشن/تیره — وقتی صفحه طرح خودش را اعلام
+         نکند، مرورگر داخلی بله/تلگرام (اندروید) Force Dark را روشن می‌کند و روی
+         تم تیرهٔ خود پنل دوگذاری می‌شود: کارت‌ها یک‌باره تیره، یک‌باره روشن می‌شوند -->
+    <meta name="color-scheme" content="light dark">
+    <style>:root{color-scheme:light}:root[data-theme="dark"]{color-scheme:dark}</style>
 
     <title>
         ملکینو - پنل مدیریت
@@ -4142,15 +4237,16 @@ if (
         <div class="admin-nav-sub-panel" data-nav-panel="comm">
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('users')" data-tour="admin-users">کاربران</button>
             <button class="tab-btn" id="commTabBtn" role="tab" aria-selected="false" onclick="switchTab('comm')">پنل پیامک</button>
+            <button class="tab-btn" id="smsTabBtn" role="tab" aria-selected="false" onclick="switchTab('sms')" data-tour="admin-sms">برنامهٔ پیامک</button>
             <button class="tab-btn" id="assistantTabBtn" role="tab" aria-selected="false" onclick="switchTab('assistant')">دستیار هوشمند</button>
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('contact')">ارتباط با ما</button>
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('support')" data-tour="admin-support">پشتیبانی</button>
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('notifications')">اعلان‌ها</button>
+            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('bots')" data-tour="admin-bots">ربات و کانال</button>
         </div>
         <div class="admin-nav-sub-panel" data-nav-panel="mkt">
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('promotions')">تبلیغات</button>
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('onboarding')">صفحات هدایت</button>
-            <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('bots')" data-tour="admin-bots">ربات و کانال</button>
         </div>
         <div class="admin-nav-sub-panel" data-nav-panel="ui">
             <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('display')" data-tour="admin-display">نمایش</button>
@@ -4709,6 +4805,7 @@ document.addEventListener('click', function (e) {
 </div>
 
 <div role="tabpanel" class="tab-content" id="tab-comm"></div>
+<?php if (is_file(__DIR__ . '/admin-sms-tab.php')) { require __DIR__ . '/admin-sms-tab.php'; } ?>
 <div role="tabpanel" class="tab-content" id="tab-assistant"></div>
 <?php require __DIR__ . '/admin-map.php'; ?>
 <!-- =========================================================
@@ -8381,6 +8478,7 @@ document
         map:         ['admin-map.js'],
         requests:    ['admin-requests.js'],
         comm:        ['admin-comm.js'],
+        sms:         ['admin-sms.js'],
         assistant:   ['admin-assistant.js'],
         bots:        ['admin-new-tabs.js'],
         display:     ['admin-new-tabs.js', 'admin-field-display.js'],

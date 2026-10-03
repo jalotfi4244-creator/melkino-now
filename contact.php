@@ -1415,6 +1415,20 @@ $logoPath = melkinoSiteLogoUrl();
                         >
                     </a>
 
+                    <!-- مسیریابی به دفتر ملکینو با برنامهٔ نقشهٔ گوشی کاربر -->
+                    <button
+                        type="button"
+                        class="map-direction-btn"
+                        id="officeDirectionsBtn"
+                        style="display:none;"
+                        onclick="mkOpenDirections(event)"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+                        </svg>
+                        مسیریابی تا دفتر ملکینو
+                    </button>
+
                 </div>
 
             </div>
@@ -2797,6 +2811,8 @@ window.MELKINO_SERVER_CONTACT = <?= melkinoJsJson($melkinoServerContact) ?>;
             liveMapEl.style.display = 'block';
             if (mapPlaceholder) mapPlaceholder.style.display = 'none';
             if (officeMapLink) officeMapLink.style.display = 'none';
+            var dirBtn = document.getElementById('officeDirectionsBtn');
+            if (dirBtn) dirBtn.style.display = 'inline-flex';
             ensureLeaflet(function () {
                 if (!window.__mkPubMap) {
                     window.__mkPubMap = L.map(liveMapEl).setView([officeLat, officeLng], officeZoom);
@@ -2818,12 +2834,89 @@ window.MELKINO_SERVER_CONTACT = <?= melkinoJsJson($melkinoServerContact) ?>;
                 officeMapLink.style.display = 'none';
             }
 
+            var dirBtn2 = document.getElementById('officeDirectionsBtn');
+            if (dirBtn2) {
+                var addrForDir = String((loadContactInfo() || {}).address || '').trim();
+                dirBtn2.style.display = addrForDir ? 'inline-flex' : 'none';
+            }
+
             if (mapPlaceholder) {
                 mapPlaceholder.style.display = 'flex';
             }
         }
     }
 
+    /* مسیریابی: باز کردن موقعیت دفتر در برنامهٔ نقشهٔ گوشی کاربر */
+    window.mkOpenDirections = function (ev) {
+        if (ev) ev.preventDefault();
+        try {
+            var data = loadContactInfo();
+            var lat = parseFloat(data && data.officeLat);
+            var lng = parseFloat(data && data.officeLng);
+            var hasCoords = isFinite(lat) && isFinite(lng)
+                && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+            var addr = String((data && data.address) || '').trim();
+            if (!hasCoords && !addr) {
+                showToast('موقعیت ثبت نشده', 'موقعیت یا آدرس دفتر در تنظیمات ثبت نشده است.');
+                return;
+            }
+            var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+            // مقصد وب (نشان): هم در مرورگر و هم در اپ اندروید باز می‌شود
+            var webNav = hasCoords
+                ? 'https://nshn.ir/maps?destination=' + lat + ',' + lng + '&type=drive'
+                : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr);
+            /* داخل مینی‌اپ تلگرام/بله (وب‌ویو)Schemeهای geo: غالباً ساکت بلاک
+               می‌شوند؛ مسیر درست، API خودِ پلتفرم است: openLink صفحه را در
+               مرورگر خارجی گوشی باز می‌کند و آنجا برنامهٔ نقشه می‌گیرد. */
+            try {
+                var __wapps = [
+                    (window.Telegram && window.Telegram.WebApp) || null,
+                    (window.Bale && window.Bale.WebApp) || null
+                ];
+                for (var __wi = 0; __wi < __wapps.length; __wi++) {
+                    var __wa = __wapps[__wi];
+                    if (__wa && typeof __wa.openLink === 'function') {
+                        __wa.openLink(webNav);
+                        try { showToast('مسیریاب در مرورگر گوشی باز شد…', '', 'success'); } catch (eT2) {}
+                        return;
+                    }
+                }
+            } catch (eW) {}
+            if (!isMobile) {
+                // دسکتاپ: باز شدن در تب جدید از داخل خود کلیک (مستثنی از بلاکر)
+                var a = document.createElement('a');
+                a.href = webNav;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} }, 60);
+                return;
+            }
+            // موبایل: ناوبری مستقیم geo: داخل خودِ کلیک — ناوبری است نه
+            // پنجرهٔ جدید، پس بلاکرها جلویش را نمی‌گیرند و انتخابگر برنامهٔ
+            // نقشهٔ گوشی (بالد/نشان/گوگل و…) باز می‌شود.
+            // طبق مشخصات geo: اندروید، برچسب باید داخل پرانتزِ «واقعی» باشد؛
+            // encode شدن پرانتزها باعث می‌شود بعضی برنامه‌های نقشه URL را نپذیرند.
+            var geoUrl = hasCoords
+                ? 'geo:' + lat + ',' + lng + '?q=' + lat + ',' + lng + '(دفتر ملکینو)'
+                : 'geo:0,0?q=' + encodeURIComponent(addr);
+            var left = false;
+            var onLeft = function () { left = true; };
+            window.addEventListener('pagehide', onLeft);
+            window.addEventListener('blur', onLeft);
+            try { showToast('در حال باز کردن برنامهٔ مسیریاب…', '', 'success'); } catch (eT) {}
+            window.location.href = geoUrl;
+            setTimeout(function () {
+                window.removeEventListener('pagehide', onLeft);
+                window.removeEventListener('blur', onLeft);
+                // اگر برنامه‌ای باز نشده بود (iOS یا نبود برنامه) → نقشهٔ وب
+                if (!left && !document.hidden) {
+                    window.location.href = webNav;
+                }
+            }, 900);
+        } catch (e) {}
+    };
 
     /* =========================================================
        PHONE GUARD

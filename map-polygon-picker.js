@@ -15,6 +15,14 @@
             pts.forEach(function (p, i) {
                 var m = L.marker([p.lat, p.lng]).addTo(layer);
                 m.bindTooltip(String(i + 1), { permanent: true, direction: 'top' });
+                // کلیک روی مارکر → حذف همان نقطه (خواستهٔ کاربر)
+                m.on('click', function (ev) {
+                    if (ev && ev.originalEvent) { L.DomEvent.stopPropagation(ev.originalEvent); }
+                    pts.splice(i, 1);
+                    sync();
+                });
+                m.on('mouseover', function () { m.unbindTooltip(); m.bindTooltip('✕ حذف', { permanent: true, direction: 'top' }); });
+                m.on('mouseout', function () { m.unbindTooltip(); m.bindTooltip(String(i + 1), { permanent: true, direction: 'top' }); });
             });
             if (pts.length >= 3) {
                 poly = L.polygon(pts.map(function (p) { return [p.lat, p.lng]; }), {
@@ -23,7 +31,9 @@
             }
             if (input) input.value = JSON.stringify(pts);
             var st = document.getElementById('mkPolyStatus');
-            if (st) st.textContent = pts.length >= 4 ? 'محدوده کامل شد. می‌توانید ثبت کنید.' : ('نقطه ' + (pts.length + 1) + ' از ۴ را روی نقشه بزنید.');
+            var stTxt = pts.length >= 4 ? 'محدوده کامل شد. می‌توانید ثبت کنید.' : ('نقطه ' + (pts.length + 1) + ' از ۴ را روی نقشه بزنید.');
+            if (pts.length > 0) stTxt += ' برای حذف هر نقطه، روی همان نقطه کلیک کنید.';
+            if (st) st.textContent = stTxt;
         }
         map.on('click', function (e) {
             if (pts.length >= 4) return;

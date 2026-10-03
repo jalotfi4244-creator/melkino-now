@@ -31,43 +31,80 @@ if (!function_exists('melkinoVerifyMiniAppInitData')) {
             return null;
         }
 
-        parse_str($initData, $parsed);
-        if (!is_array($parsed) || empty($parsed['user'])) {
+        /* امضای تلگرام/بله روی «مقادیر خام» (هنوز URL-encoded) محاسبه
+           می‌شود. parse_str مقادیر را decode می‌کند و برای نام‌های فارسی/
+           ایموجی/فاصله‌دار data-check-string را از آنچه تلگرام امضا کرده
+           جدا می‌کند → خطای «امضا معتبر نیست». حالا اول نسخهٔ RAW را
+           می‌سازیم و نسخهٔ decode شده را فقط به‌عنوان چارهٔ آخر امتحان
+           می‌کنیم تا نصب‌هایی که با روش قبلی کار می‌کردند نشکنند. */
+        $rawParsed = [];
+        foreach (explode('&', $initData) as $__seg) {
+            if ($__seg === '') continue;
+            $eq = strpos($__seg, '=');
+            if ($eq === false) { $rawParsed[$__seg] = ''; continue; }
+            $rawParsed[substr($__seg, 0, $eq)] = substr($__seg, $eq + 1);
+        }
+        if (!$rawParsed || empty($rawParsed['user'])) {
             return null;
         }
 
         // تلگرام امضا را در پارامتر hash می‌فرستد؛ بعضی نسخه‌های بله به‌جای آن
         // از signature استفاده می‌کنند. هر دو پشتیبانی می‌شوند.
         $receivedHash = '';
-        if (!empty($parsed['hash'])) {
-            $receivedHash = (string)$parsed['hash'];
-            unset($parsed['hash']);
-        } elseif (!empty($parsed['signature'])) {
-            $receivedHash = (string)$parsed['signature'];
-            unset($parsed['signature']);
+        if (!empty($rawParsed['hash'])) {
+            $receivedHash = (string)$rawParsed['hash'];
+            unset($rawParsed['hash']);
+        } elseif (!empty($rawParsed['signature'])) {
+            $receivedHash = (string)$rawParsed['signature'];
+            unset($rawParsed['signature']);
         }
 
         if ($receivedHash === '') {
             return null;
         }
 
+        $secretKey = hash_hmac('sha256', $botToken, 'WebAppData', true);
+
+        $hashOk = false;
+        $parsed = [];
+
+        /* روش ۱ (درست و استاندارد): مقادیر خام */
         $pairs = [];
-        foreach ($parsed as $key => $value) {
+        foreach ($rawParsed as $key => $value) {
             $pairs[] = $key . '=' . $value;
         }
         sort($pairs, SORT_STRING);
         $dataCheckString = implode("\n", $pairs);
-
-        $secretKey = hash_hmac('sha256', $botToken, 'WebAppData', true);
         $computedHash = hash_hmac('sha256', $dataCheckString, $secretKey);
+        if (hash_equals($computedHash, $receivedHash)) {
+            $hashOk = true;
+            parse_str($initData, $parsed); // برای خواندن مقادیر، decode لازم است
+        } else {
+            /* روش ۲ (چارهٔ آخر — سازگاری با رفتار قبلی): مقادیر decode شده */
+            parse_str($initData, $parsed);
+            if (!is_array($parsed) || empty($parsed['user'])) {
+                return null;
+            }
+            $__p2 = $parsed;
+            unset($__p2['hash'], $__p2['signature']);
+            $__pairs = [];
+            foreach ($__p2 as $key => $value) {
+                $__pairs[] = $key . '=' . $value;
+            }
+            sort($__pairs, SORT_STRING);
+            $__computed = hash_hmac('sha256', implode("\n", $__pairs), $secretKey);
+            if (hash_equals($__computed, $receivedHash)) {
+                $hashOk = true;
+            }
+        }
 
-        if (!hash_equals($computedHash, $receivedHash)) {
+        if (!$hashOk) {
             return null;
         }
 
         $authDate = (int)($parsed['auth_date'] ?? 0);
-        if ($authDate <= 0 || (time() - $authDate) > 86400) {
-            // امضا معتبر است ولی خیلی قدیمی‌ست (احتمال replay attack)
+        if ($authDate <= 0 || (time() - $authDate) > 86400 || ($authDate - time()) > 3600) {
+            // امضا معتبر است ولی خیلی قدیمی‌ست یا ساعت سرور جلوتر است (replay)
             return null;
         }
 

@@ -553,34 +553,52 @@ if (function_exists('melkinoTelegramToken')) {
 
         return fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ init_data: initData })
         })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
+        .then(function (r) { return r.text().then(function (t) { return { r: r, t: t }; }); })
+        .then(function (x) {
+            var data = null;
+            try { data = JSON.parse(x.t); } catch (eJ) { data = null; }
             if (data && data.success) {
                 authFinished = true;
+                try { sessionStorage.removeItem('melkino_auth_reload'); } catch (eC) {}
                 msg.className = 'login-msg success';
                 msg.textContent = 'ورود موفق — در حال انتقال...';
                 goToTarget(data.login_token || '');
                 return true;
             }
 
+            /* پاسخ غیر-JSON (چالش امنیتی هاست) یا ۴۰۳/۵۰۳ → یک‌بار رفرش
+               کامل خودکار؛ چالش فقط با ناوبری کامل تکمیل می‌شود. */
+            if (!data || x.r.status === 403 || x.r.status === 503 || x.r.status === 502) {
+                var n = 0;
+                try { n = parseInt(sessionStorage.getItem('melkino_auth_reload') || '0', 10) || 0; } catch (eN) {}
+                if (n < 1) {
+                    try { sessionStorage.setItem('melkino_auth_reload', String(n + 1)); } catch (eS) {}
+                    msg.className = 'login-msg info';
+                    msg.textContent = 'در حال تازه‌سازی امن اتصال…';
+                    setTimeout(function () { location.reload(); }, 600);
+                    return false;
+                }
+            }
+
             // ورود ناموفق: پیام سرور + امکان تلاش دوباره
             authFinished = false;
             msg.className = 'login-msg error';
-            let text = (data && data.message) ? data.message : 'ورود ناموفق بود.';
+            let text = (data && data.message) ? data.message : ('ورود ناموفق بود. (کد ' + x.r.status + ')');
             if (text.indexOf('منقضی') !== -1 || text.indexOf('معتبر نیست') !== -1) {
-                text += ' — برای دریافت اعتبارنامه‌ی تازه، صفحه را دوباره باز کن.';
+                text += ' — مینی‌اپ را کامل ببند و دوباره باز کن تا اعتبارنامه‌ی تازه بگیری.';
             }
             msg.innerHTML = text.replace(/</g, '&lt;')
-                + '<br><a href="#" onclick="location.reload();return false;" style="color:#7FD1BE;">🔄 تلاش دوباره</a>';
+                + '<br><a href="#" onclick="try{sessionStorage.removeItem(\'melkino_auth_reload\');}catch(e){} location.reload();return false;" style="color:#7FD1BE;">🔄 تلاش دوباره</a>';
             return false;
         })
         .catch(function () {
             msg.className = 'login-msg error';
             msg.innerHTML = 'خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن.'
-                + '<br><a href="#" onclick="location.reload();return false;" style="color:#7FD1BE;">🔄 تلاش دوباره</a>';
+                + '<br><a href="#" onclick="try{sessionStorage.removeItem(\'melkino_auth_reload\');}catch(e){} location.reload();return false;" style="color:#7FD1BE;">🔄 تلاش دوباره</a>';
             return false;
         });
     }

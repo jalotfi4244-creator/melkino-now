@@ -50,6 +50,12 @@ if (!function_exists('melkinoBotSettings')) {
             'sms_api_key'           => $sms['api_key'],
             'sms_api_url'           => $sms['api_url'],
             'sms_sender_line'       => $sms['sender_line'],
+            // سرویس‌دهنده و فیلدهای ملی‌پیامک (رمز عمداً خروجی داده نمی‌شود؛ ماسک می‌شود)
+            'sms_provider'          => (string)($sms['provider'] ?? 'melipayamak'),
+            'sms_otp_line'          => (string)($sms['otp_line'] ?? ''),
+            'sms_promo_line'        => (string)($sms['promo_line'] ?? ''),
+            'sms_otp_body_id'       => (string)($sms['otp_body_id'] ?? ''),
+            'sms_otp_template_masked' => (string)melkinoBotSetting('sms_otp_template', ''),
             // روش‌های ورود مجاز (تب «ربات و کانال» → کارت «روش‌های ورود»)
             'login_telegram_enabled' => melkinoBotSetting('login_telegram_enabled', '1'),
             'login_bale_enabled'     => melkinoBotSetting('login_bale_enabled', '1'),
@@ -111,6 +117,13 @@ if (!function_exists('melkinoSmsSettings')) {
             'api_key'     => melkinoBotSetting('sms_api_key', defined('SMS_API_KEY') ? (string)SMS_API_KEY : ''),
             'api_url'     => melkinoBotSetting('sms_api_url', defined('SMS_API_URL') ? (string)SMS_API_URL : ''),
             'sender_line' => melkinoBotSetting('sms_sender_line', defined('SMS_SENDER_LINE') ? (string)SMS_SENDER_LINE : ''),
+            // سرویس‌دهنده و فیلدهای ملی‌پیامک (برنامهٔ پیامک)
+            'provider'    => melkinoBotSetting('sms_provider', 'melipayamak'),
+            'password'    => melkinoBotSetting('sms_password', defined('SMS_API_PASSWORD') ? (string)SMS_API_PASSWORD : ''),
+            'otp_line'    => melkinoBotSetting('sms_otp_line', ''),
+            'promo_line'  => melkinoBotSetting('sms_promo_line', ''),
+            'otp_body_id' => melkinoBotSetting('sms_otp_body_id', ''),
+            'otp_template' => melkinoBotSetting('sms_otp_template', ''),
         ];
     }
 }
@@ -561,6 +574,15 @@ if (!function_exists('melkinoSaveBotSettings')) {
             'sms_api_key'           => $keepSecret('sms_api_key', trim((string)($data['sms_api_key'] ?? ''))),
             'sms_api_url'           => trim((string)($data['sms_api_url'] ?? '')),
             'sms_sender_line'       => trim((string)($data['sms_sender_line'] ?? '')),
+            // سرویس‌دهنده و فیلدهای ملی‌پیامک (برنامهٔ پیامک)
+            'sms_provider'          => trim((string)($data['sms_provider'] ?? '')) !== ''
+                ? trim((string)$data['sms_provider'])
+                : melkinoBotSetting('sms_provider', 'melipayamak'),
+            'sms_password'          => $keepSecret('sms_password', trim((string)($data['sms_password'] ?? ''))),
+            'sms_otp_line'          => trim((string)($data['sms_otp_line'] ?? '')),
+            'sms_promo_line'        => trim((string)($data['sms_promo_line'] ?? '')),
+            'sms_otp_body_id'       => trim((string)($data['sms_otp_body_id'] ?? '')),
+            'sms_otp_template'      => mb_substr(trim((string)($data['sms_otp_template'] ?? '')), 0, 300),
             // روش‌های ورود: اگر فرم (مثلاً نسخه‌ی کش‌شده‌ی قدیمی) این
             // کلیدها را نفرستاد، مقدار فعلی دست‌نخورده می‌ماند.
             'login_telegram_enabled' => array_key_exists('login_telegram_enabled', $data)
