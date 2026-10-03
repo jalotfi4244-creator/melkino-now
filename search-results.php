@@ -129,6 +129,25 @@ if ($pdo instanceof PDO) {
     }
 }
 
+// [MAP-REGION] محدودهٔ انتخابی روی نقشهٔ صفحهٔ جستجو (map_poly=4 نقطهٔ JSON)
+// اگر آمده باشد، فقط آگهی‌های داخل همان محدوده نمایش داده می‌شوند.
+$__searchPoly = [];
+try {
+    if (is_file(__DIR__ . '/map-lib.php')) {
+        require_once __DIR__ . '/map-lib.php';
+    }
+    if (function_exists('melkinoMapParsePolygon')) {
+        $__searchPoly = melkinoMapParsePolygon($_GET['map_poly'] ?? '');
+        if (count($__searchPoly) < 4) {
+            $__searchPoly = [];
+        }
+    }
+    if ($__searchPoly && function_exists('melkinoMapAdInPolygon')) {
+        $dbAds = array_values(array_filter($dbAds, static fn($ad) => melkinoMapAdInPolygon($ad, $__searchPoly)));
+    }
+} catch (Throwable $e) {
+}
+
 $initialAdsJson = json_encode(
     $dbAds,
     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT

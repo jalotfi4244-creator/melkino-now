@@ -190,9 +190,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     // اعتبارسنجی سرور برای فیلدهای اجباری قیمت/ودیعه/اجاره
     // =========================================================
     $errors = [];
-    if (count($search_polygon) < 4) {
-        $errors[] = 'لطفاً چهار نقطه برای محدوده روی نقشه مشخص کنید.';
-    }
+    // محدودهٔ نقشه اختیاری است: < ۴ نقطه یعنی بدون فیلتر منطقه
     if ($transaction_type === 'فروش' || $transaction_type === 'پیش فروش') {
         if (trim($min_price) === '') {
             $errors[] = 'حداقل قیمت الزامی است.';
@@ -3877,19 +3875,19 @@ input[type="checkbox"]{
             <div class="form-group">
 
                 <label>
-                    محدوده روی نقشه <span style="color:#c0392b">*</span>
+                    محدوده روی نقشه <span style="font-size:11px;color:var(--text-secondary);">(اختیاری)</span>
                 </label>
-                <p style="font-size:12px;line-height:1.9;color:var(--text-secondary);margin:6px 0 10px;">چهار گوشهٔ محدودهٔ مورد نظر را روی نقشه لمس کنید. فقط فایل‌هایی که موقعیت‌شان داخل این محدوده باشد تطبیق داده می‌شوند.</p>
+                <p style="font-size:12px;line-height:1.9;color:var(--text-secondary);margin:6px 0 10px;">اختیاری — اگر چهار گوشهٔ محدودهٔ مورد نظرتان را لمس کنید، فقط فایل‌های داخل همان محدوده برایتان تطبیق و ارسال می‌شود؛ اگر خالی بگذارید، تطبیق با بقیهٔ فیلترها در کل شهر انجام می‌شود. با کلیک روی هر نقطهٔ گذاشته‌شده آن حذف می‌شود.</p>
                 <input type="hidden" name="location" id="reqLocation" value="محدوده نقشه">
                 <input type="hidden" name="map_poly" id="map_poly" value="">
                 <div id="mkPolyMap" style="height:240px;border-radius:14px;overflow:hidden;border:1px solid var(--border);margin-bottom:8px;"></div>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <button type="button" class="btn-secondary" id="mkPolyReset">شروع دوباره</button>
-                    <span id="mkPolyStatus" style="font-size:12px;color:var(--text-secondary);">نقطه ۱ از ۴ را روی نقشه بزنید.</span>
+                    <span id="mkPolyStatus" style="font-size:12px;color:var(--text-secondary);">اختیاری — نقطه ۱ از ۴ را روی نقشه بزنید یا خالی بگذارید.</span>
                 </div>
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                <script src="map-polygon-picker.js?v=1"></script>
+                <script src="map-polygon-picker.js?v=<?php echo (int)@filemtime(__DIR__ . '/map-polygon-picker.js'); ?>"></script>
 
             </div>
 
@@ -6554,18 +6552,7 @@ function changeReqStep(
         }
     }
 
-    if (direction === 1 && currentReqStep === 3) {
-        try {
-            var poly = JSON.parse((document.getElementById('map_poly') || {}).value || '[]');
-            if (!poly || poly.length < 4) {
-                alert('لطفاً چهار نقطه برای محدوده روی نقشه مشخص کنید.');
-                return;
-            }
-        } catch (e) {
-            alert('لطفاً چهار نقطه برای محدوده روی نقشه مشخص کنید.');
-            return;
-        }
-    }
+    // محدودهٔ نقشه اختیاری است — اعتبارسنجی الزام حذف شد
 
     // اعتبارسنجی مرحله ۴ هنگام رفتن به مرحله بعد
     if (direction === 1 && currentReqStep === 4) {
@@ -6746,7 +6733,7 @@ function updateSummary(){
     var loc = '-';
     try {
         var poly = JSON.parse((document.getElementById('map_poly') || {}).value || '[]');
-        loc = (poly && poly.length >= 4) ? 'محدوده ۴ نقطه‌ای روی نقشه' : 'محدوده ناقص است';
+        loc = (poly && poly.length >= 4) ? 'محدوده ۴ نقطه‌ای روی نقشه' : 'کل شهر (بدون محدودهٔ نقشه)';
     } catch (e) { loc = 'محدوده نقشه'; }
 
     var date =

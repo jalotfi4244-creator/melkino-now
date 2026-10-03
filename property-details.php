@@ -3403,6 +3403,18 @@ body .consultant-btn {
 
     <?php
         $consultantPhoneHref = trim((string)($consultantPhone ?? ''));
+        // اگر مشاور تخصصی/مرکزی شماره نداشت → شمارهٔ تماسِ خودِ آگهی
+        // (همان شماره‌ای که آگهی با آن ثبت شده) تا دکمهٔ «تماس با مشاور»
+        // همیشه کار کند.
+        if ($consultantPhoneHref === '' && is_array($propertyData)) {
+            $__adPhone = trim((string)($propertyData['phone'] ?? ''));
+            $__adPhone = strtr($__adPhone, ['۰'=>'0','۱'=>'1','۲'=>'2','۳'=>'3','۴'=>'4','۵'=>'5','۶'=>'6','۷'=>'7','۸'=>'8','۹'=>'9']);
+            $consultantPhoneHref = preg_replace('/[^0-9+]/', '', $__adPhone);
+        }
+        if ($consultantPhoneHref !== '' && is_array($propertyData) && isset($propertyData['consultant']) && is_array($propertyData['consultant'])) {
+            // جاوااسکریپت (callConsultant) هم همان شماره را ببیند
+            $propertyData['consultant']['phone'] = $consultantPhoneHref;
+        }
         $consultantTelegramHref = trim((string)($consultantTelegram ?? ''));
         $vrShowContact = !empty(($fdDetCfg['sections']['contact'] ?? [])["visible"]);
         $vrIdentity = function_exists('melkinoCurrentIdentity') ? melkinoCurrentIdentity() : [];
@@ -3410,6 +3422,31 @@ body .consultant-btn {
             ? melkinoVisitRequesterGate($vrIdentity)
             : ['ok' => false, 'login' => true, 'need_phone' => false, 'message' => 'برای درخواست بازدید ابتدا وارد حساب شوید.'];
         $vrDays = function_exists('melkinoVisitNextDays') ? melkinoVisitNextDays(7) : [];
+        // ظرفیت روزانه (تنظیم ادمین): روزهایی که همهٔ بازه‌های محدوددارشان پر است غیرقابل انتخاب می‌شوند
+        try {
+            if ($vrDays && function_exists('melkinoVisitCapacity') && function_exists('melkinoVisitDayCounts')) {
+                $vrCap = melkinoVisitCapacity();
+                $vrCnt = melkinoVisitDayCounts(array_map(static fn($d) => (string) $d['date'], $vrDays));
+                $vrLimited = array_filter($vrCap, static fn($v) => (int) $v > 0);
+                foreach ($vrDays as $__i => $__d) {
+                    $__iso = (string) $__d['date'];
+                    $vrDays[$__i]['capacity'] = $vrCap;
+                    $vrDays[$__i]['slots_state'] = [];
+                    $__anyFull = false;
+                    foreach (['morning', 'evening'] as $__sk) {
+                        $__limit = (int) ($vrCap[$__sk] ?? 0);
+                        $__used = (int) ($vrCnt[$__iso][$__sk] ?? 0);
+                        $__full = ($__limit > 0 && $__used >= $__limit);
+                        $vrDays[$__i]['slots_state'][$__sk] = ['used' => $__used, 'limit' => $__limit, 'full' => $__full];
+                        if ($__full) $__anyFull = true;
+                    }
+                    // «کاملاً پر» = هر بازهٔ محدوددارِ آن روز پر باشد
+                    $vrDays[$__i]['full'] = !empty($vrLimited) && $__anyFull
+                        && !array_filter($vrDays[$__i]['slots_state'], static fn($st) => ((int) $st['limit'] > 0 && !$st['full']));
+                }
+            }
+        } catch (Throwable $e) {
+        }
         $vrAdTitle = trim((string)($propertyData['title'] ?? ''));
     ?>
 
@@ -3471,6 +3508,7 @@ body .consultant-btn {
                     <a
                         href="tel:<?= htmlspecialchars($consultantPhoneHref, ENT_QUOTES, 'UTF-8') ?>"
                         class="consultant-btn call"
+                        onclick="melkinoTryCall(this, event)"
                     >
                         <span>📞</span>
                         تماس با مشاور
@@ -3616,10 +3654,10 @@ body .consultant-btn {
         var html = '';
         var first = '';
         for (var j = 0; j < days.length; j++) {
-            var closed = days[j].selectable === false || !!days[j].closed || !!days[j].friday;
+            var closed = days[j].selectable === false || !!days[j].closed || !!days[j].friday || !!days[j].full;
             var on = !closed && !first;
             if (on) first = String(days[j].date || '');
-            html += '<button type="button" class="vr-day' + (closed ? ' is-closed' : '') + (on ? ' is-on' : '') + '" data-date="' + String(days[j].date || '') + '" data-closed="' + (closed ? '1' : '0') + '" onclick="melkinoPickVisitDay(this)">' + String(days[j].label || days[j].date) + '</button>';
+            html += '<button type="button" class="vr-day' + (closed ? ' is-closed' : '') + (on ? ' is-on' : '') + '" data-date="' + String(days[j].date || '') + '" data-closed="' + (closed ? '1' : '0') + '" data-full="' + (days[j].full ? '1' : '0') + '" onclick="melkinoPickVisitDay(this)">' + String(days[j].label || days[j].date) + (days[j].full ? ' (پر)' : '') + '</button>';
         }
         box.innerHTML = html;
         window.MELKINO_VISIT_DATE = first;
@@ -3627,6 +3665,11 @@ body .consultant-btn {
     }
     function melkinoPickVisitDay(btn) {
         if (!btn) return false;
+        if (btn.getAttribute('data-full') === '1') {
+            var lbl = btn.textContent || '';
+            melkinoVisitMsg('به علت کامل بودن برنامه بازدیدها برای «' + lbl.replace(' (پر)', '') + '» امکان ثبت بازدید نیست. لطفاً روز دیگری را انتخاب کنید.');
+            return false;
+        }
         if (btn.getAttribute('data-closed') === '1' || btn.classList.contains('is-closed') || btn.classList.contains('is-fri')) {
             melkinoVisitMsg('این روز تعطیل است و برای بازدید قابل انتخاب نیست.');
             return false;
@@ -4852,6 +4895,48 @@ function showToast(message) {
 /* =========================================================
    CALL CONSULTANT
 ========================================================= */
+
+/* [TEL-FALLBACK] راند ۲۲: وب‌ویو داخلی بله/تلگرام گاهی لینک tel: را
+   بی‌صدا مسدود می‌کند (هیچ اتفاقی نمی‌افتد). ۱.۵ ثانیه بعد از تپ، اگر
+   صفحه هنوز جلوی چشم باشد یعنی شماره‌گیر باز نشده → شماره کپی و راهنما. */
+function melkinoCopyText(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).catch(function () { melkinoCopyTextLegacy(txt); });
+        return;
+    }
+    melkinoCopyTextLegacy(txt);
+}
+
+function melkinoCopyTextLegacy(txt) {
+    try {
+        var ta = document.createElement('textarea');
+        ta.value = txt;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    } catch (e) {}
+}
+
+function melkinoTryCall(el, ev) {
+    var href = String((el && el.getAttribute && el.getAttribute('href')) || '');
+    if (href.indexOf('tel:') !== 0) return; // شاخهٔ غیرفعال toast خودش را دارد
+    if (ev && ev.preventDefault) ev.preventDefault();
+    var num = href.slice(4);
+    var dialerOpened = false;
+    var onVis = function () { dialerOpened = true; document.removeEventListener('visibilitychange', onVis); };
+    document.addEventListener('visibilitychange', onVis);
+    setTimeout(function () {
+        document.removeEventListener('visibilitychange', onVis);
+        if (!dialerOpened && !document.hidden) {
+            melkinoCopyText(num);
+            showToast('شماره‌گیر باز نشد؛ شماره «' + num + '» کپی شد — آن را در شماره‌گیر گوشی بزنید.');
+        }
+    }, 1500);
+    window.location.href = href;
+}
 
 function callConsultant() {
 

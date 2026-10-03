@@ -31,6 +31,8 @@ unset($_mkPage, $_mkAllow);
  * دکمهٔ وسط فوتر («ثبت») به این صفحه می‌آید؛ کاربر بین دو مسیر انتخاب می‌کند:
  *   ۱) ثبت ملک    → register-step1.php (مالک/مشاور، آگهی خودش را منتشر می‌کند)
  *   ۲) ثبت درخواست → property-request.php (متقاضی، دنبال ملک می‌گردد)
+ * (مسیر «مشارکت در ساخت» طبق تصمیم محصول از این صفحه حذف شد؛
+ *  فرم آن در register-partnership.php همچنان موجود است.)
  */
 require_once __DIR__ . '/header.php';
 ?>
@@ -66,21 +68,6 @@ require_once __DIR__ . '/header.php';
             <h1>چه چیزی می‌خواهید ثبت کنید؟</h1>
             <p>یکی از مسیرهای زیر را انتخاب کنید تا به فرم مربوطه هدایت شوید.</p>
         </div>
-
-        <a class="choose-card" href="register-partnership.php">
-            <div class="cc-top">
-                <div class="cc-icon" style="background:rgba(212,175,55,.14)">🏗️</div>
-                <div>
-                    <div class="cc-title">مشارکت در ساخت</div>
-                    <div class="cc-sub">ملک خود را به سازنده‌ها معرفی کنید</div>
-                </div>
-            </div>
-            <p class="cc-desc">
-                اگر زمین، خانه کلنگی یا ملکی برای مشارکت در ساخت دارید، شرایط خود را (سهم، بلاعوض،
-                ظرفیت ساخت و...) ثبت کنید تا سازنده‌های معتبر با شما تماس بگیرند.
-            </p>
-            <span class="cc-go">ثبت درخواست مشارکت ←</span>
-        </a>
 
         <a class="choose-card" href="register-step1.php">
             <div class="cc-top">

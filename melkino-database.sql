@@ -1,28 +1,12 @@
 -- ============================================================
--- ملکینو — فایل دیتابیس (اسکیما)
+-- ملکینو — ساختار کامل دیتابیس (جدول‌های خالی، بدون داده)
+-- نسخهٔ ۶ — ستون‌ها و جدول‌ها دقیقاً مطابق کد فعلی
+-- ایمپورت در phpMyAdmin هاست (MySQL / MariaDB — از جمله InfinityFree)
+-- قابل اجرای مجدد است (CREATE TABLE IF NOT EXISTS)
 -- ============================================================
--- این فایل «کامل» است: هم جدول‌ها را می‌سازد (CREATE TABLE IF NOT
--- EXISTS) و هم در بخش پایانی، ستون‌های جاافتادهٔ جدول‌های «موجود» را
--- با دستورهای شرطیِ بی‌خطر اضافه می‌کند (فقط اگر ستون وجود نداشته
--- باشد؛ وگرنه هیچ کاری نمی‌کند). یکسان‌سازی collation جدول‌های
--- مقایسه هم در همان بخش انجام می‌شود.
---
--- یعنی:
---   * import روی دیتابیس موجود → هیچ داده‌ای پاک نمی‌شود
---   * چند بار import کردن → بی‌خطر (idempotent)
---   * هم MySQL و هم MariaDB پشتیبانی می‌شوند
---   * دیگر نیازی به اجرای melkino-migrate.php نیست؛ این فایل
---     همان کارها (ستون‌ها + collation) را خودش انجام می‌دهد
---
--- import: از phpMyAdmin هاست (تب Import) یا خط فرمان:
---   mysql -u USER -p DBNAME < melkino-database.sql
--- ============================================================
-
 SET NAMES utf8mb4;
+SET foreign_key_checks = 0;
 
--- ---------- آگهی‌ها ----------
--- نکته: در دیتابیس واقعیِ ملکینو، شناسه‌ی آگهی رشته است
--- (مثل AD-20260906-4691) و ستون عددی جداگانه numeric_id وجود دارد.
 CREATE TABLE IF NOT EXISTS `ads` (
   `numeric_id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `id` VARCHAR(64) NOT NULL,
@@ -102,6 +86,12 @@ CREATE TABLE IF NOT EXISTS `ads` (
   `bale_message_id` VARCHAR(40) NULL,
   `bale_channel_id` VARCHAR(120) NULL,
   `bale_published_at` DATETIME NULL,
+  `created_by_telegram_id` VARCHAR(30) NULL,
+  `default_image_no` TINYINT NULL DEFAULT NULL,
+  `melkino_visited` TINYINT(1) NOT NULL DEFAULT 0,
+  `melkino_rating` DECIMAL(3,1) NULL,
+  `melkino_review` TEXT NULL,
+  `building_age` INT NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_numeric` (`numeric_id`),
   KEY `idx_status` (`status`),
@@ -109,7 +99,6 @@ CREATE TABLE IF NOT EXISTS `ads` (
   KEY `idx_phone` (`phone`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- کاربران ----------
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `telegram_id` VARCHAR(30) NULL,
@@ -143,12 +132,13 @@ CREATE TABLE IF NOT EXISTS `users` (
   `first_name` VARCHAR(100) NULL,
   `last_name` VARCHAR(100) NULL,
   `name_locked` TINYINT(1) NOT NULL DEFAULT 0,
+  `eitaa_id` VARCHAR(64) NULL,
+  `eitaa_username` VARCHAR(191) NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_tg` (`telegram_id`),
   UNIQUE KEY `uniq_bale` (`bale_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- کدهای یک‌بارمصرفِ ورود با پیامک (request-otp.php / verify-otp.php)
 CREATE TABLE IF NOT EXISTS `otp_codes` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `phone` VARCHAR(30) NOT NULL,
@@ -160,12 +150,12 @@ CREATE TABLE IF NOT EXISTS `otp_codes` (
   `is_used` TINYINT(1) NOT NULL DEFAULT 0,
   `expires_at` DATETIME NULL,
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  `code_hash` VARCHAR(128) NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_otp_phone` (`phone`),
   KEY `idx_otp_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- تصاویر آگهی‌ها ----------
 CREATE TABLE IF NOT EXISTS `images` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `ad_id` VARCHAR(64) NOT NULL,
@@ -180,32 +170,35 @@ CREATE TABLE IF NOT EXISTS `images` (
   KEY `idx_ad` (`ad_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- مقایسه ملک‌ها ----------
-CREATE TABLE IF NOT EXISTS `compare_items` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` INT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `guest_token` VARCHAR(64) NULL,
-  `ad_id` VARCHAR(64) NOT NULL,
-  `group_no` TINYINT NOT NULL DEFAULT 1,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS compare_items (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  guest_token VARCHAR(64) NULL,
+  ad_id VARCHAR(64) NOT NULL,
+  group_no TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_owner (user_id, telegram_id),
+  KEY idx_guest (guest_token),
+  KEY idx_ad (ad_id),
   PRIMARY KEY (`id`),
   KEY `idx_owner` (`user_id`, `telegram_id`, `guest_token`),
   KEY `idx_ad` (`ad_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `compare_groups` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` INT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `guest_token` VARCHAR(64) NULL,
-  `group_no` TINYINT NOT NULL,
-  `name` VARCHAR(60) NOT NULL DEFAULT '',
+CREATE TABLE IF NOT EXISTS compare_groups (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  guest_token VARCHAR(64) NULL,
+  group_no TINYINT NOT NULL,
+  name VARCHAR(60) NOT NULL DEFAULT '',
+  KEY idx_owner (user_id, telegram_id),
+  KEY idx_guest (guest_token),
   PRIMARY KEY (`id`),
   KEY `idx_owner` (`user_id`, `telegram_id`, `guest_token`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ---------- علاقه‌مندی‌ها / اعلان‌ها ----------
 CREATE TABLE IF NOT EXISTS `favorites` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id` INT NULL,
@@ -230,24 +223,25 @@ CREATE TABLE IF NOT EXISTS `notifications` (
   `match_percent` DECIMAL(5,2) NULL,
   `is_read` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  `read_at` DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_owner` (`user_id`, `telegram_id`, `is_read`),
-  KEY `idx_notif_broadcast` (`broadcast_id`)
+  KEY `idx_notif_broadcast` (`broadcast_id`),
+  KEY idx_broadcast (broadcast_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- اعلان‌های عمومی (برودکست) که از پنل ادمین برای همه ارسال می‌شود
-CREATE TABLE IF NOT EXISTS `notification_broadcasts` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `title` VARCHAR(200) NOT NULL,
-  `message` TEXT NULL,
-  `url` VARCHAR(500) NULL,
-  `sent_count` INT NOT NULL DEFAULT 0,
-  `created_by` BIGINT UNSIGNED NULL,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS notification_broadcasts (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  url VARCHAR(500) NULL,
+  sent_count INT NOT NULL DEFAULT 0,
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_created (created_at),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ---------- مشاوران ----------
 CREATE TABLE IF NOT EXISTS `consultants` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(120) NULL,
@@ -268,7 +262,6 @@ CREATE TABLE IF NOT EXISTS `consultant_specialties` (
   KEY `idx_consultant` (`consultant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- امکانات ----------
 CREATE TABLE IF NOT EXISTS `amenities` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(120) NOT NULL,
@@ -285,37 +278,40 @@ CREATE TABLE IF NOT EXISTS `ad_amenities` (
   KEY `idx_amenity` (`amenity_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- درخواست‌های کاربر ----------
-CREATE TABLE IF NOT EXISTS `property_requests` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `tracking_code` VARCHAR(40) NULL,
-  `user_id` INT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `phone` VARCHAR(30) NULL,
-  `gender` VARCHAR(10) NULL,
-  `last_name` VARCHAR(120) NULL,
-  `transaction_type` VARCHAR(60) NULL,
-  `property_type` VARCHAR(60) NULL,
-  `location` VARCHAR(255) NULL,
-  `urgency` VARCHAR(40) NULL,
-  `date_needed` VARCHAR(40) NULL,
-  `rahn_kamal` VARCHAR(10) NULL,
-  `min_area` VARCHAR(30) NULL,
-  `max_area` VARCHAR(30) NULL,
-  `min_price` VARCHAR(40) NULL,
-  `max_price` VARCHAR(40) NULL,
-  `min_deposit` VARCHAR(40) NULL,
-  `max_deposit` VARCHAR(40) NULL,
-  `min_rent` VARCHAR(40) NULL,
-  `max_rent` VARCHAR(40) NULL,
-  `min_age` VARCHAR(10) NULL,
-  `max_age` VARCHAR(10) NULL,
-  `is_not_keyed` TINYINT(1) NOT NULL DEFAULT 0,
-  `status` VARCHAR(30) NOT NULL DEFAULT 'new',
-  `additional` TEXT NULL,
-  `property_details` LONGTEXT NULL,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NULL,
+CREATE TABLE IF NOT EXISTS property_requests (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tracking_code VARCHAR(40) NULL,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  phone VARCHAR(30) NULL,
+  gender VARCHAR(10) NULL,
+  last_name VARCHAR(120) NULL,
+  transaction_type VARCHAR(60) NULL,
+  property_type VARCHAR(60) NULL,
+  location VARCHAR(255) NULL,
+  urgency VARCHAR(40) NULL,
+  date_needed VARCHAR(40) NULL,
+  rahn_kamal VARCHAR(10) NULL,
+  min_area VARCHAR(30) NULL,
+  max_area VARCHAR(30) NULL,
+  min_price VARCHAR(40) NULL,
+  max_price VARCHAR(40) NULL,
+  min_deposit VARCHAR(40) NULL,
+  max_deposit VARCHAR(40) NULL,
+  min_rent VARCHAR(40) NULL,
+  max_rent VARCHAR(40) NULL,
+  min_age VARCHAR(10) NULL,
+  max_age VARCHAR(10) NULL,
+  is_not_keyed TINYINT(1) NOT NULL DEFAULT 0,
+  status VARCHAR(30) NOT NULL DEFAULT 'new',
+  additional TEXT NULL,
+  property_details LONGTEXT NULL,
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  PRIMARY KEY (id),
+  KEY idx_owner (user_id, telegram_id),
+  KEY idx_track (tracking_code),
+  KEY idx_status (status),
   PRIMARY KEY (`id`),
   KEY `idx_owner` (`user_id`, `telegram_id`),
   KEY `idx_track` (`tracking_code`),
@@ -328,25 +324,27 @@ CREATE TABLE IF NOT EXISTS `request_amenities` (
   KEY `idx_req` (`request_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `request_matches` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `request_id` INT NOT NULL,
-  `ad_id` VARCHAR(64) NOT NULL,
-  `match_percent` DECIMAL(5,2) NULL DEFAULT 0,
-  `matched_transaction` VARCHAR(60) NULL,
-  `matched_property_type` VARCHAR(60) NULL,
-  `location_score` INT NULL,
-  `area_score` INT NULL,
-  `budget_score` INT NULL,
-  `amenities_score` INT NULL,
-  `is_notified` TINYINT(1) NOT NULL DEFAULT 0,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS request_matches (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  request_id INT NOT NULL,
+  ad_id VARCHAR(64) NOT NULL,
+  match_percent DECIMAL(5,2) NULL DEFAULT 0,
+  matched_transaction VARCHAR(60) NULL,
+  matched_property_type VARCHAR(60) NULL,
+  location_score INT NULL,
+  area_score INT NULL,
+  budget_score INT NULL,
+  amenities_score INT NULL,
+  is_notified TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_req (request_id),
+  KEY idx_ad (ad_id),
   PRIMARY KEY (`id`),
   KEY `idx_req` (`request_id`),
   KEY `idx_ad` (`ad_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- ویرایش‌های کاربران ----------
 CREATE TABLE IF NOT EXISTS `ad_revisions` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `ad_id` VARCHAR(64) NOT NULL,
@@ -358,39 +356,49 @@ CREATE TABLE IF NOT EXISTS `ad_revisions` (
   KEY `idx_ad` (`ad_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- رویدادهای ورود / توکن‌ها ----------
-CREATE TABLE IF NOT EXISTS `login_events` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` INT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `bale_id` VARCHAR(64) NULL,
-  `username` VARCHAR(191) NULL,
-  `name` VARCHAR(191) NULL,
-  `ip_address` VARCHAR(45) NULL,
-  `ip` VARCHAR(45) NULL,
-  `user_agent` VARCHAR(1000) NULL,
-  `platform` VARCHAR(20) NULL,
-  `language_code` VARCHAR(10) NULL,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS login_events (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  bale_id VARCHAR(64) NULL,
+  username VARCHAR(191) NULL,
+  name VARCHAR(191) NULL,
+  ip_address VARCHAR(45) NULL,
+  ip VARCHAR(45) NULL,
+  user_agent VARCHAR(1000) NULL,
+  platform VARCHAR(20) NULL,
+  language_code VARCHAR(10) NULL,
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  `eitaa_id` VARCHAR(64) NULL,
+  PRIMARY KEY (id),
+  KEY idx_login_events_user (user_id),
+  KEY idx_login_events_tg (telegram_id),
   PRIMARY KEY (`id`),
   KEY `idx_login_events_user` (`user_id`),
   KEY `idx_login_events_tg` (`telegram_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `login_tokens` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+CREATE TABLE IF NOT EXISTS login_tokens (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  token CHAR(64) NOT NULL,
+  user_id BIGINT UNSIGNED NULL,
+  telegram_id VARCHAR(191) NULL,
+  bale_id VARCHAR(191) NULL,
+  user_agent VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  first_used_at DATETIME NULL,
+  expires_at DATETIME NOT NULL,
   `token_hash` VARCHAR(128) NOT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `bale_id` VARCHAR(64) NULL,
   `platform` VARCHAR(20) NULL,
   `used` TINYINT(1) NOT NULL DEFAULT 0,
-  `expires_at` DATETIME NULL,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_login_tokens_token (token),
+  KEY idx_login_tokens_user (user_id),
+  KEY idx_login_tokens_expires (expires_at),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_token` (`token_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- ادمین‌ها ----------
 CREATE TABLE IF NOT EXISTS `admins` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `username` VARCHAR(64) NOT NULL,
@@ -412,252 +420,620 @@ CREATE TABLE IF NOT EXISTS `admin_login_attempts` (
   KEY `idx_ip_time` (`ip`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ---------- تنظیمات / پشتیبانی ----------
-CREATE TABLE IF NOT EXISTS `settings` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `setting_group` VARCHAR(64) NOT NULL DEFAULT 'global',
-  `setting_key` VARCHAR(191) NOT NULL,
-  `setting_value` LONGTEXT NULL,
-  `value_type` VARCHAR(32) NOT NULL DEFAULT 'string',
-  `updated_by_admin_id` BIGINT UNSIGNED NULL,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS settings (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  setting_group VARCHAR(64) NOT NULL DEFAULT 'global',
+  setting_key VARCHAR(191) NOT NULL,
+  setting_value LONGTEXT NULL,
+  value_type VARCHAR(32) NOT NULL DEFAULT 'string',
+  updated_by_admin_id BIGINT UNSIGNED NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_settings_group_key (setting_group, setting_key),
+  KEY idx_settings_group (setting_group),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_settings_group_key` (`setting_group`, `setting_key`),
   KEY `idx_settings_group` (`setting_group`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `support_tickets` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `user_id` INT NULL,
-  `telegram_id` VARCHAR(64) NULL,
-  `name` VARCHAR(120) NULL,
-  `phone` VARCHAR(30) NULL,
-  `subject` VARCHAR(255) NULL,
-  `status` VARCHAR(30) NOT NULL DEFAULT 'open',
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NULL,
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  phone VARCHAR(30) NULL,
+  name VARCHAR(120) NULL,
+  subject VARCHAR(255) NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'open',
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  PRIMARY KEY (id),
+  KEY idx_support_status (status),
+  KEY idx_support_updated_at (updated_at),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB
+                DEFAULT CHARSET=utf8mb4
+                COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `support_messages` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `ticket_id` INT NOT NULL,
-  `sender_type` VARCHAR(20) NOT NULL DEFAULT 'user',
-  `sender_id` VARCHAR(64) NULL,
-  `sender_name` VARCHAR(120) NULL,
-  `message` TEXT NULL,
-  `is_read` TINYINT(1) NOT NULL DEFAULT 0,
-  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  ticket_id INT NOT NULL,
+  sender_type VARCHAR(20) NOT NULL DEFAULT 'user',
+  sender_id VARCHAR(64) NULL,
+  sender_name VARCHAR(120) NULL,
+  message TEXT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_support_messages_ticket (ticket_id),
+  KEY idx_sender_read (sender_type, is_read),
   PRIMARY KEY (`id`),
   KEY `idx_ticket` (`ticket_id`),
   KEY `idx_sender_read` (`sender_type`, `is_read`)
+) ENGINE=InnoDB
+                DEFAULT CHARSET=utf8mb4
+                COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS channel_publish_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ad_id VARCHAR(40) NOT NULL,
+  platform VARCHAR(10) NOT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 0,
+  message_id VARCHAR(60) NULL,
+  note VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_cpl_ad (ad_id),
+  INDEX idx_cpl_created (created_at),
+  INDEX `idx_cpl_ad` (`ad_id`),
+  INDEX `idx_cpl_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ============================================================
--- پایان فایل
--- ============================================================
-
--- ============================================================
--- بخش ۲) ستون‌های جاافتادهٔ جدول‌های «موجود»
--- ============================================================
--- ============================================================
--- 1-13) لاگ انتشار آگهی در کانال‌ها (راند ۱۸)
---   هر بار انتشار (موفق/ناموفق) در تلگرام یا بله یک ردیف ثبت می‌شود
--- ============================================================
-CREATE TABLE IF NOT EXISTS `channel_publish_logs` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `ad_id` VARCHAR(40) NOT NULL,
-    `platform` VARCHAR(10) NOT NULL,
-    `success` TINYINT(1) NOT NULL DEFAULT 0,
-    `message_id` VARCHAR(60) NULL,
-    `note` VARCHAR(255) NULL,
-    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX `idx_cpl_ad` (`ad_id`),
-    INDEX `idx_cpl_created` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- CREATE TABLE IF NOT EXISTS به جدولِ از قبل موجود دست نمی‌زند؛
--- بنابراین ستون‌های جدید (مثل فیلدهای وام) باید با ALTER اضافه
--- شوند. هر دستور زیر «شرطی» است: اول در INFORMATION_SCHEMA نگاه
--- می‌کند و فقط اگر ستون واقعاً وجود نداشت آن را می‌سازد؛ وگرنه
--- هیچ کاری نمی‌کند (DO 0). یعنی:
---   * اجرای این فایل روی دیتابیس موجود هیچ داده‌ای را پاک نمی‌کند
---   * چند بار اجرا کردنش هم بی‌خطر است (idempotent)
---   * هم روی MySQL کار می‌کند و هم MariaDB
--- ============================================================
-
--- ---------- ads ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `owner_user_id` INT NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='owner_user_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `consultant_id` INT NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='consultant_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `area` VARCHAR(30) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='area');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `built_area` VARCHAR(30) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='built_area');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `land_area` VARCHAR(30) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='land_area');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `rooms` VARCHAR(10) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='rooms');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `floor` VARCHAR(10) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='floor');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `year` VARCHAR(10) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='year');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `display_price` VARCHAR(40) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='display_price');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `vip_until` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='vip_until');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `rejected_at` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='rejected_at');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `archived_at` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='archived_at');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `bale_message_id` VARCHAR(40) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='bale_message_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `bale_channel_id` VARCHAR(120) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='bale_channel_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `bale_published_at` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='bale_published_at');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `user_id` INT NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='user_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `telegram_id` VARCHAR(64) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='telegram_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `views` INT NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='views');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `has_loan` TINYINT(1) NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='has_loan');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_amount` VARCHAR(40) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_amount');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_type` VARCHAR(60) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_type');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_duration` VARCHAR(60) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_duration');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_bank` VARCHAR(120) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_bank');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_installment` VARCHAR(40) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_installment');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_installments_paid` VARCHAR(20) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_installments_paid');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `loan_notes` VARCHAR(500) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='loan_notes');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `deed_type` VARCHAR(40) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='deed_type');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `deed_notes` VARCHAR(500) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='deed_notes');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `exchange_types` VARCHAR(255) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='exchange_types');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- users ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `bale_id` VARCHAR(30) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='bale_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `first_login` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='first_login');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `last_login` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='last_login');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `login_count` INT NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='login_count');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `last_ip` VARCHAR(45) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='last_ip');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `last_platform` VARCHAR(20) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='last_platform');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `user_agent` VARCHAR(1000) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='user_agent');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `photo_url` VARCHAR(500) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='photo_url');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `language_code` VARCHAR(10) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='language_code');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `bale_username` VARCHAR(191) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='bale_username');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `updated_at` DATETIME NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='updated_at');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `users` ADD COLUMN `access_token` VARCHAR(64) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='access_token');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- images ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `storage_path` VARCHAR(500) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='storage_path');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='sort_order');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `is_selected` TINYINT(1) NOT NULL DEFAULT 1', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='is_selected');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `is_primary` TINYINT(1) NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='is_primary');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `publish_publicly` TINYINT(1) NOT NULL DEFAULT 1', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='publish_publicly');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `images` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='images' AND COLUMN_NAME='created_at');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- compare_items ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `compare_items` ADD COLUMN `guest_token` VARCHAR(64) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='compare_items' AND COLUMN_NAME='guest_token');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- compare_groups ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `compare_groups` ADD COLUMN `guest_token` VARCHAR(64) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='compare_groups' AND COLUMN_NAME='guest_token');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- settings ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `settings` ADD COLUMN `setting_group` VARCHAR(64) NOT NULL DEFAULT ''global''', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='settings' AND COLUMN_NAME='setting_group');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `settings` ADD COLUMN `value_type` VARCHAR(32) NOT NULL DEFAULT ''string''', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='settings' AND COLUMN_NAME='value_type');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `settings` ADD COLUMN `updated_by_admin_id` BIGINT UNSIGNED NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='settings' AND COLUMN_NAME='updated_by_admin_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- amenities ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `amenities` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='amenities' AND COLUMN_NAME='sort_order');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- notifications ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notifications` ADD COLUMN `url` VARCHAR(500) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notifications' AND COLUMN_NAME='url');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notifications` ADD COLUMN `broadcast_id` BIGINT UNSIGNED NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notifications' AND COLUMN_NAME='broadcast_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notifications` ADD COLUMN `request_id` INT UNSIGNED NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notifications' AND COLUMN_NAME='request_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notifications` ADD COLUMN `ad_id` VARCHAR(64) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notifications' AND COLUMN_NAME='ad_id');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notifications` ADD COLUMN `match_percent` DECIMAL(5,2) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notifications' AND COLUMN_NAME='match_percent');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ---------- notification_broadcasts ----------
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `notification_broadcasts` ADD COLUMN `created_by` BIGINT UNSIGNED NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='notification_broadcasts' AND COLUMN_NAME='created_by');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ============================================================
--- بخش ۳) یکسان‌سازی collation جدول‌های مقایسه با جدول ads
--- (رفع خطای ۱۲۶۷ «Illegal mix of collations» در محیط واقعی)
--- فقط وقتی اجرا می‌شود که collation واقعاً متفاوت باشد.
--- ============================================================
-SET @target := (SELECT TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads');
-SET @cur := (SELECT TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='compare_items');
-SET @s := IF(@target IS NOT NULL AND @cur IS NOT NULL AND @cur <> @target, CONCAT('ALTER TABLE `compare_items` CONVERT TO CHARACTER SET ', SUBSTRING_INDEX(@target, '_', 1), ' COLLATE ', @target), 'DO 0');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @cur := (SELECT TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='compare_groups');
-SET @s := IF(@target IS NOT NULL AND @cur IS NOT NULL AND @cur <> @target, CONCAT('ALTER TABLE `compare_groups` CONVERT TO CHARACTER SET ', SUBSTRING_INDEX(@target, '_', 1), ' COLLATE ', @target), 'DO 0');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- راند ۸۳: امتیاز بازدید ملکینو روی آگهی
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `melkino_visited` TINYINT(1) NOT NULL DEFAULT 0', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='melkino_visited');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `melkino_rating` DECIMAL(3,1) NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='melkino_rating');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-SET @s := (SELECT IF(COUNT(*)=0, 'ALTER TABLE `ads` ADD COLUMN `melkino_review` TEXT NULL', 'DO 0') FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ads' AND COLUMN_NAME='melkino_review');
-PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
-
--- ✅ پایان فایل دیتابیس
-
--- راند ۴۶: جدول بازخورد تطبیق‌ها (هم‌نوع با request_matches.id)
 CREATE TABLE IF NOT EXISTS request_match_feedback (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    request_match_id INT UNSIGNED NOT NULL,
-    user_id BIGINT UNSIGNED NULL,
-    telegram_id VARCHAR(128) NULL,
-    feedback ENUM('like','dislike') NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_rmf_match_user (request_match_id, user_id, telegram_id),
-    KEY idx_rmf_match (request_match_id),
-    KEY idx_rmf_user (user_id),
-    KEY idx_rmf_telegram (telegram_id),
-    CONSTRAINT fk_rmf_match FOREIGN KEY (request_match_id) REFERENCES request_matches(id) ON DELETE CASCADE
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  request_match_id INT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NULL,
+  telegram_id VARCHAR(128) NULL,
+  feedback ENUM('like','dislike') NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_rmf_match_user
+                (request_match_id, user_id, telegram_id),
+  KEY idx_rmf_match
+                (request_match_id),
+  KEY idx_rmf_user
+                (user_id),
+  KEY idx_rmf_telegram
+                (telegram_id),
+  UNIQUE KEY uq_rmf_match_user (request_match_id, user_id, telegram_id),
+  KEY idx_rmf_match (request_match_id),
+  KEY idx_rmf_user (user_id),
+  KEY idx_rmf_telegram (telegram_id)
+) ENGINE=InnoDB
+        DEFAULT CHARSET=utf8mb4
+        COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS partnership_requests (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  code VARCHAR(24) NULL,
+  user_id INT NULL,
+  owner_name VARCHAR(120) NOT NULL DEFAULT '',
+  phone VARCHAR(30) NOT NULL DEFAULT '',
+  status VARCHAR(30) NOT NULL DEFAULT 'pending',
+  property_type VARCHAR(60) NOT NULL DEFAULT '',
+  title VARCHAR(500) NOT NULL DEFAULT '',
+  area VARCHAR(30) NOT NULL DEFAULT '',
+  current_status VARCHAR(60) NOT NULL DEFAULT '',
+  photos LONGTEXT NULL,
+  city VARCHAR(120) NOT NULL DEFAULT '',
+  neighborhood VARCHAR(120) NOT NULL DEFAULT '',
+  address VARCHAR(1000) NOT NULL DEFAULT '',
+  latitude DECIMAL(10,7) NULL,
+  longitude DECIMAL(10,7) NULL,
+  location_source VARCHAR(20) NULL,
+  passage_width VARCHAR(20) NOT NULL DEFAULT '',
+  land_width VARCHAR(20) NOT NULL DEFAULT '',
+  br_count VARCHAR(30) NOT NULL DEFAULT '',
+  direction VARCHAR(10) NOT NULL DEFAULT '',
+  building_age VARCHAR(10) NOT NULL DEFAULT '',
+  current_floors VARCHAR(10) NOT NULL DEFAULT '',
+  current_units VARCHAR(10) NOT NULL DEFAULT '',
+  current_parkings VARCHAR(10) NOT NULL DEFAULT '',
+  capacity_known TINYINT(1) NOT NULL DEFAULT 1,
+  density VARCHAR(20) NOT NULL DEFAULT '',
+  occupancy_rate VARCHAR(20) NOT NULL DEFAULT '',
+  buildable_floors VARCHAR(10) NOT NULL DEFAULT '',
+  buildable_area VARCHAR(20) NOT NULL DEFAULT '',
+  buildable_units VARCHAR(10) NOT NULL DEFAULT '',
+  permit_status VARCHAR(40) NOT NULL DEFAULT '',
+  permit_number VARCHAR(60) NOT NULL DEFAULT '',
+  permit_date VARCHAR(30) NOT NULL DEFAULT '',
+  permit_floors VARCHAR(10) NOT NULL DEFAULT '',
+  permit_area VARCHAR(20) NOT NULL DEFAULT '',
+  owner_share VARCHAR(10) NOT NULL DEFAULT '',
+  builder_share VARCHAR(10) NOT NULL DEFAULT '',
+  balaghz VARCHAR(30) NOT NULL DEFAULT '',
+  balaghz_amount VARCHAR(40) NOT NULL DEFAULT '',
+  division_method VARCHAR(40) NOT NULL DEFAULT '',
+  unit_shares LONGTEXT NULL,
+  partner_parkings VARCHAR(10) NOT NULL DEFAULT '',
+  partner_storage VARCHAR(10) NOT NULL DEFAULT '',
+  duration VARCHAR(60) NOT NULL DEFAULT '',
+  funding VARCHAR(60) NOT NULL DEFAULT '',
+  value_from VARCHAR(40) NOT NULL DEFAULT '',
+  value_to VARCHAR(40) NOT NULL DEFAULT '',
+  notes TEXT NULL,
+  deed_status VARCHAR(40) NOT NULL DEFAULT '',
+  deed_kind VARCHAR(40) NOT NULL DEFAULT '',
+  owners_count VARCHAR(10) NOT NULL DEFAULT '',
+  occupancy VARCHAR(40) NOT NULL DEFAULT '',
+  legal_status LONGTEXT NULL,
+  doc_deed VARCHAR(500) NOT NULL DEFAULT '',
+  doc_permit VARCHAR(500) NOT NULL DEFAULT '',
+  doc_endjob VARCHAR(500) NOT NULL DEFAULT '',
+  doc_other LONGTEXT NULL,
+  completeness TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  admin_note VARCHAR(1000) NOT NULL DEFAULT '',
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_partnership_code (code),
+  KEY idx_part_status (status),
+  KEY idx_part_created (created_at),
+  KEY idx_part_user (user_id),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_partnership_code` (`code`),
+  KEY `idx_part_status` (`status`),
+  KEY `idx_part_created` (`created_at`),
+  KEY `idx_part_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sms_outbox (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  goal VARCHAR(30) NOT NULL DEFAULT 'manual',
+  phone VARCHAR(20) NOT NULL,
+  body TEXT NOT NULL,
+  meta_json TEXT NULL,
+  line VARCHAR(30) NULL,
+  rec_id VARCHAR(64) NULL,
+  status VARCHAR(15) NOT NULL DEFAULT 'queued',
+  fail_reason VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  KEY idx_goal (goal, status),
+  KEY idx_phone (phone, created_at),
+  KEY idx_created (created_at),
+  PRIMARY KEY (`id`),
+  KEY `idx_goal` (`goal`, `status`),
+  KEY `idx_phone` (`phone`, `created_at`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS sms_optouts (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  phone VARCHAR(20) NOT NULL,
+  scope VARCHAR(15) NOT NULL DEFAULT 'all',
+  source VARCHAR(60) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_phone_scope (phone, scope),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_phone_scope` (`phone`, `scope`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NULL,
+  phone VARCHAR(20) NULL,
+  title VARCHAR(160) NULL,
+  tx VARCHAR(60) NULL,
+  property_type VARCHAR(60) NULL,
+  district VARCHAR(120) NULL,
+  min_price VARCHAR(40) NULL,
+  max_price VARCHAR(40) NULL,
+  min_area VARCHAR(30) NULL,
+  max_area VARCHAR(30) NULL,
+  rooms VARCHAR(10) NULL,
+  notify TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_notified_at DATETIME NULL,
+  KEY idx_user (user_id),
+  KEY idx_notify (notify),
+  PRIMARY KEY (`id`),
+  KEY `idx_user` (`user_id`),
+  KEY `idx_notify` (`notify`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ad_views (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  bale_id VARCHAR(64) NULL,
+  ad_id VARCHAR(64) NOT NULL,
+  ad_title VARCHAR(255) NULL,
+  viewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_user (user_id),
+  KEY idx_ad (ad_id),
+  KEY idx_viewed (viewed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS admin_phone_audit (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admin_id INT NULL,
+  admin_username VARCHAR(100) NULL,
+  user_id INT NOT NULL,
+  action VARCHAR(50) NOT NULL,
+  old_phone VARCHAR(30) NULL,
+  new_phone VARCHAR(30) NULL,
+  ip_address VARCHAR(45) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_apa_user (user_id),
+  INDEX idx_apa_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ads_history (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  ad_id VARCHAR(64) NOT NULL,
+  action VARCHAR(60) NOT NULL,
+  detail VARCHAR(500) NULL,
+  actor VARCHAR(120) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_ah_ad (ad_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS assistant_chat (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  role VARCHAR(20) NOT NULL,
+  message MEDIUMTEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS assistant_evidence (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  insight_id INT UNSIGNED NOT NULL,
+  fact_text VARCHAR(400) NOT NULL,
+  source_table VARCHAR(64) NULL,
+  source_id VARCHAR(64) NULL,
+  KEY idx_insight (insight_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS assistant_insights (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  run_id INT UNSIGNED NOT NULL,
+  fingerprint VARCHAR(80) NOT NULL,
+  type VARCHAR(40) NOT NULL,
+  type_label VARCHAR(80) NOT NULL,
+  priority VARCHAR(20) NOT NULL,
+  confidence DECIMAL(4,2) NOT NULL DEFAULT 0,
+  user_id INT NULL,
+  ad_id VARCHAR(64) NULL,
+  request_id INT NULL,
+  visit_id INT NULL,
+  phone VARCHAR(30) NULL,
+  person_name VARCHAR(160) NULL,
+  tracking_code VARCHAR(40) NULL,
+  ad_title VARCHAR(255) NULL,
+  title VARCHAR(190) NOT NULL,
+  what_happened TEXT NULL,
+  why_it_matters TEXT NULL,
+  interpretation TEXT NULL,
+  action TEXT NULL,
+  signals VARCHAR(500) NULL,
+  score INT NULL,
+  last_activity DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_run (run_id),
+  KEY idx_fp (fingerprint),
+  KEY idx_prio (priority),
+  KEY idx_type (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS assistant_runs (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  started_at DATETIME NOT NULL,
+  finished_at DATETIME NOT NULL,
+  views_n INT NOT NULL DEFAULT 0,
+  requests_n INT NOT NULL DEFAULT 0,
+  matches_n INT NOT NULL DEFAULT 0,
+  ads_n INT NOT NULL DEFAULT 0,
+  favorites_n INT NOT NULL DEFAULT 0,
+  visits_n INT NOT NULL DEFAULT 0,
+  users_n INT NOT NULL DEFAULT 0,
+  insights_n INT NOT NULL DEFAULT 0,
+  notes TEXT NULL,
+  KEY idx_finished (finished_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_audit (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  action VARCHAR(80) NOT NULL,
+  detail TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_automations (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(160) NOT NULL,
+  event_key VARCHAR(40) NOT NULL,
+  recipient_type VARCHAR(40) NOT NULL DEFAULT 'admin',
+  recipient_phone VARCHAR(20) NULL,
+  body TEXT NOT NULL,
+  timing VARCHAR(20) NOT NULL DEFAULT 'digest',
+  interval_min INT NOT NULL DEFAULT 30,
+  min_count INT NOT NULL DEFAULT 1,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  last_run_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_campaigns (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(160) NOT NULL,
+  body TEXT NOT NULL,
+  segment_id INT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  recipients_n INT NOT NULL DEFAULT 0,
+  sent_n INT NOT NULL DEFAULT 0,
+  fail_n INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  `scheduled_at` DATETIME NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_clicks (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tracking_id INT UNSIGNED NOT NULL,
+  clicked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_t (tracking_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_contact_tags (
+  contact_id INT UNSIGNED NOT NULL,
+  tag_id INT UNSIGNED NOT NULL,
+  PRIMARY KEY (contact_id, tag_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_contacts (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  phone VARCHAR(20) NOT NULL,
+  user_id INT NULL,
+  first_name VARCHAR(100) NULL,
+  last_name VARCHAR(120) NULL,
+  name VARCHAR(160) NULL,
+  roles_suggested VARCHAR(255) NULL,
+  roles_verified VARCHAR(255) NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  source VARCHAR(40) NULL,
+  properties_n INT NOT NULL DEFAULT 0,
+  requests_n INT NOT NULL DEFAULT 0,
+  visits_n INT NOT NULL DEFAULT 0,
+  views_n INT NOT NULL DEFAULT 0,
+  last_activity DATETIME NULL,
+  last_sms_at DATETIME NULL,
+  city VARCHAR(80) NULL,
+  district VARCHAR(120) NULL,
+  telegram_id VARCHAR(64) NULL,
+  bale_id VARCHAR(64) NULL,
+  telegram_username VARCHAR(100) NULL,
+  bale_username VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  UNIQUE KEY uq_phone (phone),
+  KEY idx_status (status),
+  KEY idx_act (last_activity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_deferred (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  phone VARCHAR(20) NOT NULL,
+  body TEXT NOT NULL,
+  contact_id INT NULL,
+  campaign_id INT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'WAITING',
+  send_after DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_st (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_export_log (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  scope VARCHAR(40) NULL,
+  rows_n INT NOT NULL DEFAULT 0,
+  format VARCHAR(10) NOT NULL DEFAULT 'xlsx',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_followups (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  contact_id INT UNSIGNED NOT NULL,
+  title VARCHAR(190) NOT NULL,
+  due_date DATE NULL,
+  priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
+  notes TEXT NULL,
+  related_ad VARCHAR(64) NULL,
+  related_request INT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'open',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_c (contact_id),
+  KEY idx_due (due_date, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_messages (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  phone VARCHAR(20) NOT NULL,
+  contact_id INT NULL,
+  body TEXT NOT NULL,
+  campaign_id INT NULL,
+  template_id INT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 0,
+  result_message VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_phone (phone),
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_notes (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  contact_id INT UNSIGNED NOT NULL,
+  body TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_c (contact_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_segments (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  criteria TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_settings (
+  k VARCHAR(80) NOT NULL PRIMARY KEY,
+  v TEXT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_tags (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(80) NOT NULL,
+  UNIQUE KEY uq_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_templates (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  body TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS comm_tracking_links (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  short_code VARCHAR(16) NOT NULL,
+  destination_url VARCHAR(500) NOT NULL,
+  contact_id INT NULL,
+  campaign_id INT NULL,
+  message_id INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_code (short_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lead_sms_log (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  kind VARCHAR(40) NOT NULL,
+  request_id INT NULL,
+  ad_id VARCHAR(64) NULL,
+  user_id INT NULL,
+  phone VARCHAR(30) NOT NULL,
+  message TEXT NOT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 0,
+  result_message VARCHAR(255) NULL,
+  admin_id INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_kind (kind, created_at),
+  KEY idx_phone (phone)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `melkino_audit_log` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `actor_type` VARCHAR(20) NOT NULL DEFAULT 'admin',
+  `actor_id` VARCHAR(64) NULL,
+  `actor_name` VARCHAR(120) NULL,
+  `action` VARCHAR(80) NOT NULL,
+  `entity` VARCHAR(60) NULL,
+  `entity_id` VARCHAR(64) NULL,
+  `details` TEXT NULL,
+  `ip_address` VARCHAR(45) NULL,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_action` (`action`),
+  KEY `idx_entity` (`entity`, `entity_id`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `melkino_rate_limits` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `bucket` VARCHAR(190) NOT NULL,
+  `created_at` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_bucket_time` (`bucket`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  title VARCHAR(255) NOT NULL DEFAULT '',
+  image_url VARCHAR(500) NOT NULL DEFAULT '',
+  link_url VARCHAR(500) NOT NULL DEFAULT '',
+  button_text VARCHAR(100) NOT NULL DEFAULT 'مشاهده',
+  description VARCHAR(1000) NOT NULL DEFAULT '',
+  placement VARCHAR(50) NOT NULL DEFAULT 'all',
+  position_after INT UNSIGNED NOT NULL DEFAULT 3,
+  repeat_every INT UNSIGNED NOT NULL DEFAULT 0,
+  start_date DATETIME NULL,
+  end_date DATETIME NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  views INT UNSIGNED NOT NULL DEFAULT 0,
+  clicks INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS visit_requests (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  ad_id VARCHAR(64) NOT NULL,
+  ad_title VARCHAR(500) NULL,
+  user_id INT NULL,
+  telegram_id VARCHAR(64) NULL,
+  phone VARCHAR(30) NULL,
+  name VARCHAR(200) NULL,
+  preferred_date DATE NOT NULL,
+  preferred_date_fa VARCHAR(40) NULL,
+  weekday VARCHAR(40) NULL,
+  time_slot VARCHAR(20) NOT NULL DEFAULT 'morning',
+  alternative_datetime TEXT NULL,
+  advertiser_last_name VARCHAR(120) NULL,
+  advertiser_phone VARCHAR(30) NULL,
+  ad_snapshot LONGTEXT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'new',
+  admin_note TEXT NULL,
+  created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NULL,
+  `archived` TINYINT(1) NOT NULL DEFAULT 0,
+  `requester_name` VARCHAR(120) NULL,
+  `requester_phone` VARCHAR(30) NULL,
+  PRIMARY KEY (id),
+  KEY idx_ad (ad_id),
+  KEY idx_owner (user_id, telegram_id),
+  KEY idx_phone (phone),
+  KEY idx_status (status),
+  KEY idx_date (preferred_date),
+  KEY idx_vr_track (tracking_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `location_change_log` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ad_id` VARCHAR(64) NOT NULL,
+  `user_id` BIGINT UNSIGNED NULL DEFAULT NULL,
+  `old_latitude` DECIMAL(10,7) NULL DEFAULT NULL,
+  `old_longitude` DECIMAL(10,7) NULL DEFAULT NULL,
+  `new_latitude` DECIMAL(10,7) NULL DEFAULT NULL,
+  `new_longitude` DECIMAL(10,7) NULL DEFAULT NULL,
+  `change_source` VARCHAR(40) NOT NULL DEFAULT '',
+  `changed_by` VARCHAR(120) NOT NULL DEFAULT '',
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_lcl_ad` (`ad_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- حساب ادمین اولیه (برای اولین ورود به پنل)
+-- نام کاربری: admin
+-- رمز عبور:   Melkino@1404
+-- ⚠️ بلافاصله پس از اولین ورود، از پنل ادمین → تب «تغییر رمز»
+--    رمز را عوض کنید. این ردیف اگر از قبل موجود باشد دوباره ساخته
+--    نمی‌شود (username یکتاست) و رمز حساب موجود را تغییر نمی‌دهد.
+-- ============================================================
+INSERT INTO admins (username, password_hash, display_name, is_active, updated_at)
+SELECT 'admin', '$2y$10$FKjXyDwlsvqsS6j1R38YL.p9wX4gBLl7AKfRfIwbqlvFRrvBGXRbe', 'مدیر ملکینو', 1, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM admins WHERE username = 'admin');

@@ -28,9 +28,38 @@ $isAdmin = !empty($_SESSION['is_admin']) && $_SESSION['is_admin'] === true;
 
 if ($action === 'days') {
     $closed = melkinoVisitClosedSettings();
+    $days = melkinoVisitNextDays(7);
+    // ظرفیت روزانه: هر روز/بازه که پر شد، غیرقابل انتخاب می‌شود
+    $cap = melkinoVisitCapacity();
+    $counts = melkinoVisitDayCounts(array_map(static fn($d) => (string) $d['date'], $days));
+    foreach ($days as $i => $d) {
+        $iso = (string) $d['date'];
+        $days[$i]['capacity'] = $cap;
+        $days[$i]['slots_state'] = [];
+        $anyFull = false;
+        foreach (melkinoVisitSlots() as $slotKey => $slotLabel) {
+            $limit = (int) ($cap[$slotKey] ?? 0);
+            $used = (int) ($counts[$iso][$slotKey] ?? 0);
+            $full = ($limit > 0 && $used >= $limit);
+            $days[$i]['slots_state'][$slotKey] = [
+                'used' => $used,
+                'limit' => $limit,
+                'remaining' => $limit > 0 ? max(0, $limit - $used) : null,
+                'full' => $full,
+            ];
+            if ($full) {
+                $anyFull = true;
+            }
+        }
+        $days[$i]['full'] = $anyFull && !array_filter($days[$i]['slots_state'], static fn($st) => empty($st['full']));
+        // روز «کاملاً پر» یعنی همهٔ بازه‌های محدوددار پر باشند
+        $limited = array_filter($cap, static fn($v) => (int) $v > 0);
+        $days[$i]['full'] = !empty($limited) && $anyFull
+            && !array_filter($days[$i]['slots_state'], static fn($st) => ((int) $st['limit'] > 0 && !$st['full']));
+    }
     melkinoJsonResponse([
         'success' => true,
-        'days' => melkinoVisitNextDays(7),
+        'days' => $days,
         'slots' => melkinoVisitSlots(),
         'closed_weekdays' => $closed['weekdays'],
         'closed_dates' => $closed['dates'],
@@ -129,6 +158,19 @@ if ($action === 'create') {
     $day = $allowed[$date];
     if (!empty($day['closed']) || (isset($day['selectable']) && !$day['selectable'])) {
         melkinoJsonResponse(['success' => false, 'message' => 'این روز تعطیل است و برای بازدید قابل انتخاب نیست.'], 422);
+    }
+    // ظرفیت روزانه (تنظیم ادمین): اگر بازهٔ انتخابی پر بود، ثبت نمی‌شود
+    $cap = melkinoVisitCapacity();
+    $slotLimit = (int) ($cap[$slot] ?? 0);
+    if ($slotLimit > 0) {
+        $__counts = melkinoVisitDayCounts([$date]);
+        $__used = (int) ($__counts[$date][$slot] ?? 0);
+        if ($__used >= $slotLimit) {
+            melkinoJsonResponse([
+                'success' => false,
+                'message' => 'به علت کامل بودن برنامه بازدیدها برای «' . $day['label'] . '» امکان ثبت بازدید نیست؛ لطفاً روز دیگری را انتخاب کنید.',
+            ], 422);
+        }
     }
 
     $adTitle = '';
@@ -440,6 +482,71 @@ if ($action === 'admin_save_note') {
     }
     $pdo->prepare('UPDATE visit_requests SET admin_note = ?, updated_at = NOW() WHERE id = ?')->execute([$note !== '' ? $note : null, $id]);
     melkinoJsonResponse(['success' => true, 'message' => 'یادداشت ذخیره شد.']);
+}
+
+if ($action === 'admin_edit') {
+    if (!$isAdmin) {
+        melkinoJsonResponse(['success' => false, 'message' => 'دسترسی مجاز نیست.'], 403);
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        melkinoJsonResponse(['success' => false, 'message' => 'روش درخواست نامعتبر است.'], 405);
+    }
+    $id = (int) ($_POST['id'] ?? 0);
+    if ($id <= 0) {
+        melkinoJsonResponse(['success' => false, 'message' => 'شناسه نامعتبر است.'], 422);
+    }
+    $st = $pdo->prepare('SELECT * FROM visit_requests WHERE id = ? LIMIT 1');
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        melkinoJsonResponse(['success' => false, 'message' => 'درخواست یافت نشد.'], 404);
+    }
+    $name = trim((string) ($_POST['requester_name'] ?? ''));
+    $phone = melkinoVisitNormalizePhone(trim((string) ($_POST['requester_phone'] ?? '')));
+    $date = melkinoVisitNormalizeDigits(trim((string) ($_POST['preferred_date'] ?? '')));
+    if (function_exists('melkinoVisitToGregorianDate')) {
+        $asG = melkinoVisitToGregorianDate($date);
+        if ($asG !== '') {
+            $date = $asG;
+        }
+    }
+    $slot = trim((string) ($_POST['time_slot'] ?? ''));
+    $alt = trim((string) ($_POST['alternative_datetime'] ?? ''));
+    if (function_exists('mb_substr')) {
+        $alt = mb_substr($alt, 0, 500);
+    } else {
+        $alt = substr($alt, 0, 500);
+    }
+    $slots = melkinoVisitSlots();
+    if ($name === '' || $phone === '' || $date === '' || !isset($slots[$slot])) {
+        melkinoJsonResponse(['success' => false, 'message' => 'نام، شمارهٔ معتبر، تاریخ و بازهٔ زمانی الزامی است.'], 422);
+    }
+    if (function_exists('melkinoVisitAddColumn')) {
+        // ستون‌های ویرایش ادمین ممکن است روی نصب‌های قدیمی وجود نداشته باشند
+        melkinoVisitAddColumn($pdo, 'requester_name', 'VARCHAR(120) NULL');
+        melkinoVisitAddColumn($pdo, 'requester_phone', 'VARCHAR(30) NULL');
+    }
+    $pdo->prepare('UPDATE visit_requests SET requester_name = ?, requester_phone = ?, preferred_date = ?, time_slot = ?, alternative_datetime = ? WHERE id = ?')
+        ->execute([$name, $phone, $date, $slot, $alt, $id]);
+    melkinoJsonResponse(['success' => true, 'message' => 'تغییرات بازدید ذخیره شد.']);
+}
+
+if ($action === 'admin_save_capacity') {
+    if (!$isAdmin) {
+        melkinoJsonResponse(['success' => false, 'message' => 'دسترسی مجاز نیست.'], 403);
+    }
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        melkinoJsonResponse(['success' => false, 'message' => 'روش درخواست نامعتبر است.'], 405);
+    }
+    $cap = [
+        'morning' => max(0, min(200, (int) ($_POST['morning'] ?? 0))),
+        'evening' => max(0, min(200, (int) ($_POST['evening'] ?? 0))),
+    ];
+    if (!function_exists('dbSettingSet')) {
+        melkinoJsonResponse(['success' => false, 'message' => 'ذخیرهٔ تنظیمات در دسترس نیست.'], 500);
+    }
+    dbSettingSet($pdo, 'visit', 'capacity', $cap, 'json', (int) ($_SESSION['admin_id'] ?? 0));
+    melkinoJsonResponse(['success' => true, 'message' => 'ظرفیت بازدید روزانه ذخیره شد.']);
 }
 
 if ($action === 'admin_delete') {

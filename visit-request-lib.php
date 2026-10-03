@@ -198,6 +198,8 @@ if (!function_exists('melkinoEnsureVisitRequestSchema')) {
             melkinoVisitAddColumn($pdo, 'ad_snapshot', 'LONGTEXT NULL');
             melkinoVisitAddColumn($pdo, 'tracking_code', 'VARCHAR(30) NULL');
             melkinoVisitAddColumn($pdo, 'archived', 'TINYINT(1) NOT NULL DEFAULT 0');
+            melkinoVisitAddColumn($pdo, 'requester_name', 'VARCHAR(120) NULL');
+            melkinoVisitAddColumn($pdo, 'requester_phone', 'VARCHAR(30) NULL');
             try {
                 $pdo->exec("ALTER TABLE visit_requests MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'new'");
             } catch (Throwable $e) {
@@ -301,6 +303,53 @@ if (!function_exists('melkinoVisitClosedSettings')) {
             }
         }
         return ['weekdays' => $weekdays, 'dates' => $dates];
+    }
+}
+
+if (!function_exists('melkinoVisitCapacity')) {
+    /** ظرفیت بازدید روزانه برای هر بازهٔ زمانی — از پنل ادمین قابل تغییر */
+    function melkinoVisitCapacity(): array
+    {
+        $cap = ['morning' => 0, 'evening' => 0]; // ۰ = بدون محدودیت
+        global $pdo;
+        if ($pdo instanceof PDO && function_exists('dbSettingGet')) {
+            try {
+                $raw = dbSettingGet($pdo, 'visit', 'capacity', null);
+                if (is_array($raw)) {
+                    foreach (['morning', 'evening'] as $k) {
+                        $v = (int) ($raw[$k] ?? 0);
+                        $cap[$k] = max(0, min(200, $v));
+                    }
+                }
+            } catch (Throwable $e) {
+            }
+        }
+        return $cap;
+    }
+}
+
+if (!function_exists('melkinoVisitDayCounts')) {
+    /** تعداد بازدیدِ ثبت‌شدهٔ هر روز/بازه (بایگانی‌شده‌ها و حذف‌شده‌ها حساب نمی‌شوند) */
+    function melkinoVisitDayCounts(array $dates): array
+    {
+        global $pdo;
+        $out = [];
+        if (!($pdo instanceof PDO) || !$dates) {
+            return $out;
+        }
+        try {
+            $in = implode(',', array_fill(0, count($dates), '?'));
+            $st = $pdo->prepare("SELECT preferred_date, time_slot, COUNT(*) c FROM visit_requests
+                                 WHERE archived = 0 AND status <> 'cancelled_by_user'
+                                   AND preferred_date IN ($in)
+                                 GROUP BY preferred_date, time_slot");
+            $st->execute($dates);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(string) $r['preferred_date']][(string) $r['time_slot']] = (int) $r['c'];
+            }
+        } catch (Throwable $e) {
+        }
+        return $out;
     }
 }
 

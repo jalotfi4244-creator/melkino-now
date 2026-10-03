@@ -219,6 +219,27 @@ require_once __DIR__ . '/header.php';
                 <p class="properties-subtitle">فایل‌های منتشرشده ملکینو را ببین، گزینه‌ها را مقایسه کن و ملک مناسب خودت را پیدا کن.</p>
             </div>
         </section>
+<?php
+    // دکمهٔ «ذخیرهٔ این جستجو»: فقط برای کاربر واردشده (مهمان → ورود)
+    $__ssLoggedIn = !empty($_SESSION['user_id']) || !empty($_SESSION['user_phone'])
+        || !empty($_SESSION['reg_telegram_id']) || !empty($_SESSION['reg_bale_id'])
+        || !empty($_SESSION['reg_eitaa_id']) || !empty($_SESSION['is_admin']);
+    ?>
+        <form id="saveSearchForm" method="post" action="saved-search-save.php" class="tx-chip" style="cursor:pointer;" title="با انتشار ملک جدیدِ منطبق با همین فیلترها، پیامک می‌گیریید">
+            <input type="hidden" name="tx" value="">
+            <input type="hidden" name="property_type" value="">
+            <input type="hidden" name="district" value="">
+            <input type="hidden" name="min_price" value="">
+            <input type="hidden" name="max_price" value="">
+            <input type="hidden" name="min_area" value="">
+            <input type="hidden" name="max_area" value="">
+            <input type="hidden" name="rooms" value="">
+            <input type="hidden" name="title" value="">
+            <button type="submit" style="all:unset;cursor:pointer;font:inherit;color:inherit;display:inline;flex:none;">💾 ذخیرهٔ این جستجو</button>
+        </form>
+        <?php if (!$__ssLoggedIn): ?>
+        <script>document.getElementById('saveSearchForm').outerHTML = '<a class="tx-chip" href="login.php?redirect=' + encodeURIComponent(location.pathname + location.search) + '">💾 ذخیرهٔ این جستجو</a>';</script>
+        <?php endif; ?>
         <div class="properties-toolbar">
             <div class="properties-count" id="propertiesCount">در حال بارگذاری...</div>
             <div class="tx-chips" id="txChips">
@@ -270,6 +291,30 @@ require_once __DIR__ . '/header.php';
     function markTxChips() {
         document.querySelectorAll('#txChips .tx-chip').forEach(function (c) {
             c.classList.toggle('is-on', c.getAttribute('data-tx') === activeTx);
+        });
+    }
+    // [SAVED-SEARCH] پرکردن فرم ذخیرهٔ جستجو از فیلترهای فعال
+    var ssForm = document.getElementById('saveSearchForm');
+    if (ssForm) {
+        ssForm.addEventListener('submit', function () {
+            var q = new URLSearchParams(location.search);
+            var setv = function (n, v) { var el = ssForm.querySelector('[name="' + n + '"]'); if (el) el.value = v || ''; };
+            setv('tx', activeTx === 'all' ? '' : activeTx);
+            setv('property_type', q.get('property_type') || q.get('type') || '');
+            setv('district', q.get('district') || q.get('location') || '');
+            setv('min_price', q.get('min_price') || '');
+            setv('max_price', q.get('max_price') || '');
+            setv('min_area', q.get('min_area') || '');
+            setv('max_area', q.get('max_area') || '');
+            setv('rooms', q.get('rooms') || '');
+            var bits = [];
+            var txTxt = activeTx === 'all' ? '' : (activeTx === 'اجاره' ? 'اجاره و رهن' : activeTx);
+            if (txTxt) bits.push(txTxt);
+            var pt = (q.get('property_type') || q.get('type') || '').trim();
+            if (pt) bits.push(pt);
+            var ds = (q.get('district') || q.get('location') || '').trim();
+            if (ds) bits.push(ds);
+            setv('title', bits.join(' | ').slice(0, 120));
         });
     }
     document.querySelectorAll('#txChips .tx-chip').forEach(function (c) {

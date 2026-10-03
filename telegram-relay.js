@@ -187,27 +187,3 @@
         tokenCache = {};
     };
 })();
-
-(function bootMelkinoAssistant() {
-    function load() {
-        if (document.getElementById('melkino-assistant-boot')) return;
-        if (!document.querySelector('.tabs-container')) return;
-        var s = document.createElement('script');
-        s.id = 'melkino-assistant-boot';
-        s.src = 'admin-assistant.js?v=ast-btns-4';
-        s.defer = true;
-        document.head.appendChild(s);
-        if (!document.getElementById('melkino-comm-boot')) {
-            var c = document.createElement('script');
-            c.id = 'melkino-comm-boot';
-            c.src = 'admin-comm.js?v=cm4';
-            c.defer = true;
-            document.head.appendChild(c);
-        }
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', load);
-    } else {
-        load();
-    }
-})();

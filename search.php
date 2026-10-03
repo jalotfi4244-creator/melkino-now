@@ -1029,7 +1029,7 @@ require_once __DIR__ . '/header.php';
                 </div>
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                <script src="map-polygon-picker.js?v=2"></script>
+                <script src="map-polygon-picker.js?v=<?php echo (int)@filemtime(__DIR__ . '/map-polygon-picker.js'); ?>"></script>
             </div>
 
 

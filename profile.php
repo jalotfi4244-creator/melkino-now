@@ -49,6 +49,8 @@ $userPhone = trim((string)($_SESSION['user_phone'] ?? ''));
 $myPropertiesCount = 0;
 $myRequestsCount   = 0;
 $myVisitsCount     = 0;
+$visitCountdownDays = null; // نزدیک‌ترین قرار بازدید چند روز مانده (null = قراری نیست)
+$visitCountdownSlot = '';
 $favoriteCount     = 0;
 $notificationCount = 0;
 $matchCount = 0;
@@ -142,6 +144,22 @@ if ($pdo instanceof PDO) {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM visit_requests WHERE $vrWhere");
             $stmt->execute($vrParams);
             $myVisitsCount = (int)$stmt->fetchColumn();
+
+            // تایمر بازدید: نزدیک‌ترین قرار بازدیدِ پیش‌رو (غیر لغوشده)
+            // برای نمایش «N روز مانده تا قرار بازدید» در حساب کاربری
+            $stmt = $pdo->prepare("SELECT preferred_date, time_slot FROM visit_requests
+                WHERE $vrWhere AND archived = 0 AND status <> 'cancelled_by_user'
+                  AND preferred_date >= CURDATE()
+                ORDER BY preferred_date ASC, id ASC LIMIT 1");
+            $stmt->execute($vrParams);
+            if ($__nextVisit = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $__vd = strtotime((string)$__nextVisit['preferred_date']);
+                $__td = strtotime(date('Y-m-d'));
+                if ($__vd !== false && $__td !== false) {
+                    $visitCountdownDays = (int)round((($__vd - $__td) / 86400));
+                    $visitCountdownSlot = (string)$__nextVisit['time_slot'] === 'evening' ? 'عصر' : 'صبح';
+                }
+            }
         }
     } catch (Throwable $e) { $myVisitsCount = 0; }
     $favParts=[];$favParams=[];$notifParts=[];$notifParams=[];
@@ -163,6 +181,13 @@ if ($pdo instanceof PDO) {
     }
 }
 
+if (!function_exists('melkinoFaNum')) {
+    function melkinoFaNum(string $v): string
+    {
+        return strtr($v, ['0'=>'۰','1'=>'۱','2'=>'۲','3'=>'۳','4'=>'۴','5'=>'۵','6'=>'۶','7'=>'۷','8'=>'۸','9'=>'۹']);
+    }
+}
+
 /*
 |--------------------------------------------------------------------------
 | علاقه‌مندی‌ها
@@ -177,6 +202,18 @@ require_once __DIR__ . '/header.php';
     /* =========================================================
        MELKINO PROFILE
        ========================================================= */
+
+    .vr-countdown {
+        margin-top: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 11.5px;
+        font-weight: 800;
+        line-height: 1.8;
+        display: inline-block;
+    }
+    .vr-countdown.vr-cd-green  { background: rgba(16,128,80,.14);  color: #0f8a52; border: 1px solid rgba(16,128,80,.35); }
+    .vr-countdown.vr-cd-orange { background: rgba(214,140,0,.14); color: #b26a00; border: 1px solid rgba(214,140,0,.35); }
 
     .main-content {
         flex: 1;
@@ -1816,6 +1853,17 @@ require_once __DIR__ . '/header.php';
                 <div class="profile-stat-subtitle">
                     درخواست‌های بازدید ملک
                 </div>
+
+<?php if ($visitCountdownDays !== null): ?>
+                <?php
+                    // رنگ‌بندی همان قاعدهٔ صفحهٔ بازدیدها: سبز (۲+ روز)، نارنجی (امروز/فردا)
+                    if ($visitCountdownDays <= 0)      { $__cdCls = 'vr-cd-orange'; $__cdTxt = 'امروز قرار بازدید دارید'; }
+                    elseif ($visitCountdownDays === 1) { $__cdCls = 'vr-cd-orange'; $__cdTxt = 'فردا قرار بازدید دارید'; }
+                    else                               { $__cdCls = 'vr-cd-green';  $__cdTxt = melkinoFaNum((string)$visitCountdownDays) . ' روز مانده تا قرار بازدید'; }
+                    $__cdTxt .= ' (' . $visitCountdownSlot . ')';
+                ?>
+                <div class="vr-countdown <?= $__cdCls ?>" title="زمان تا قرار بازدید">⏰ <?= htmlspecialchars($__cdTxt, ENT_QUOTES, 'UTF-8') ?></div>
+<?php endif; ?>
 
             </a>
 
